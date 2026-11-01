@@ -42,6 +42,7 @@ export interface FacStats {
   utilization: number;
   cu: number;
   warnings: string[];
+  campus: number;
 }
 
 export interface Derived {
@@ -127,8 +128,14 @@ export function deriveAll(s: GameState): Derived {
   const itBonusG = deptBonus(s, 'it');
   const financeBonus = deptBonus(s, 'finance');
 
+  // campus synergy: facilities sharing a city block / development zone share fiber & power
+  const blockCount: Record<string, number> = {};
+  const blockOf = (pid: string) => getParcel(pid)?.blockId ?? pid;
+  for (const f of Object.values(s.facilities)) if (!f.isHQ) blockCount[blockOf(f.parcelId)] = (blockCount[blockOf(f.parcelId)] ?? 0) + 1;
+
   for (const f of Object.values(s.facilities)) {
     const r = rawStats(s, f, e);
+    const campus = f.isHQ ? 0 : Math.min(0.12, 0.03 * ((blockCount[blockOf(f.parcelId)] ?? 1) - 1));
     const city = cityById(f.cityId);
     const elecB = deptBonus(s, 'electrical', f.id);
     const coolB = deptBonus(s, 'cooling', f.id);
@@ -147,7 +154,7 @@ export function deriveAll(s: GameState): Derived {
     const allow = 4;
     const networkFactor = r.servers <= allow ? 1 : 0.4 + 0.6 * Math.min(1, (r.network + allow) / r.servers);
     const conditionFactor = f.condition >= 70 ? 1 : 0.5 + f.condition / 140;
-    const perfBoost = 1 + eff(e, 'perf') + itB * 0.15 + (r.liquid > 0 ? 0.03 : 0);
+    const perfBoost = 1 + eff(e, 'perf') + itB * 0.15 + (r.liquid > 0 ? 0.03 : 0) + campus;
     const perf = Math.max(0, powerFactor * coolingFactor * networkFactor * conditionFactor * perfBoost);
     const ratio = coolingCap > 0 ? load / coolingCap : load > 0 ? 2 : 0;
     const temperature = ratio <= 1 ? 19 + 16 * ratio : 35 + 22 * (ratio - 1);
@@ -189,7 +196,7 @@ export function deriveAll(s: GameState): Derived {
       revenue: { contracts: 0, spot: 0 }, expenses,
       revenueHr: 0, expenseHr: 0, profitHr: 0,
       equipmentValue: r.equipValue * ECONOMY.equipmentBookValue,
-      value: 0, utilization: 0, cu: 0, warnings,
+      value: 0, utilization: 0, cu: 0, warnings, campus,
     };
     st.cu = delivered.cpu * ECONOMY.cuPerUnit.cpu + delivered.gpu * ECONOMY.cuPerUnit.gpu + delivered.storage * ECONOMY.cuPerUnit.storage;
     playerCU[f.cityId] = (playerCU[f.cityId] ?? 0) + st.cu;
@@ -204,10 +211,10 @@ export function deriveAll(s: GameState): Derived {
   for (const c of CITIES) {
     let supply = playerCU[c.id] ?? 0;
     for (const comp of s.competitors) for (const site of comp.sites) if (site.cityId === c.id && site.stage === 'operational') supply += site.cu;
-    const demand = c.demand * (s.cityDemand[c.id] ?? 1);
+    const demand = c.demand * ECONOMY.demandScale * (s.cityDemand[c.id] ?? 1);
     citySupply[c.id] = supply;
     cityDemand[c.id] = demand;
-    let price = Math.max(0.35, Math.min(1.25, 1.25 - 0.7 * (supply / demand)));
+    let price = Math.max(ECONOMY.priceFloor, Math.min(ECONOMY.priceTop, ECONOMY.priceTop - ECONOMY.priceSlope * (supply / demand)));
     if (s.events.some((x) => x.defId === 'demand_surge' && x.cityId === c.id)) price *= 1.3;
     cityPrice[c.id] = price;
   }
@@ -240,8 +247,8 @@ export function deriveAll(s: GameState): Derived {
     st.expenseHr = Object.values(st.expenses).reduce((a, b) => a + b, 0);
     st.profitHr = st.revenueHr - st.expenseHr;
     st.value = f.shellValue * ECONOMY.buildingBookValue * (0.5 + f.condition / 200) + st.equipmentValue;
-    const totDel = st.delivered.cpu * 0.9 + st.delivered.gpu * 30 + st.delivered.storage * 0.1;
-    const totAlloc = st.allocated.cpu * 0.9 + st.allocated.gpu * 30 + st.allocated.storage * 0.1;
+    const totDel = st.delivered.cpu * 1.2 + st.delivered.gpu * 30 + st.delivered.storage * 0.12;
+    const totAlloc = st.allocated.cpu * 1.2 + st.allocated.gpu * 30 + st.allocated.storage * 0.12;
     st.utilization = totDel > 0 ? totAlloc / totDel : 0;
   }
 

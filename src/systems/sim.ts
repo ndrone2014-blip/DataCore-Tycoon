@@ -82,6 +82,10 @@ export function newGame(o: NewGameOptions): GameState {
 
   s.competitors = createCompetitors(s);
   seedCompetitors(s);
+  for (const c of s.competitors) {
+    c.valuation = c.cash + c.sites.reduce((a, x) => a + x.invested, 0) * 0.72;
+    c.history.push(Math.round(c.valuation));
+  }
   refreshCandidates(s);
   log(s, `${s.company.name} was founded in ${cityById(o.startCity).name}. Your first property: ${start.name}.`, 'good');
   const d = deriveAll(s);
@@ -107,7 +111,7 @@ function rollReports(s: GameState, prevHours: number, d: Derived) {
   f.hourly.push(h);
   if (f.hourly.length > 72) f.hourly.splice(0, f.hourly.length - 72);
   f.cur.hour = emptyReport(nh);
-  if (profit > 0) addXp(s, (profit * span) / ECONOMY.xp.profitPer);
+  if (d.totals.profitHr > 0) addXp(s, ECONOMY.xp.profitXpScale * Math.pow(d.totals.profitHr, ECONOMY.xp.profitXpExp) * span);
   checkAchievements(s, d);
   // day rollover
   if (Math.floor(nh / 24) !== Math.floor(ph / 24)) {
@@ -197,7 +201,7 @@ export function step(s: GameState, realSeconds: number): Derived {
 
   // market demand grows over time (the AI boom never stops)
   const boom = s.events.some((x) => x.defId === 'ai_boom');
-  for (const c of CITIES) s.cityDemand[c.id] = (s.cityDemand[c.id] ?? 1) + (0.0045 / 24) * dt * (boom ? 2 : 1);
+  for (const c of CITIES) s.cityDemand[c.id] = (s.cityDemand[c.id] ?? 1) + (ECONOMY.demandGrowthPerDay / 24) * dt * (boom ? 2 : 1);
 
   rollReports(s, prev, d);
   // structural changes (new facility, etc.) need fresh derived stats for the UI
@@ -250,7 +254,7 @@ export function catchUp(s: GameState, nowMs = Date.now(), maxSeconds?: number): 
   const before = {
     cash: s.cash, rev: s.finance.totalRevenue, exp: s.finance.totalExpenses,
     builds: s.stats.buildsCompleted ?? 0, research: s.research.done.length, contracts: s.stats.contractsCompleted ?? 0,
-    level: s.level, log: s.log.length,
+    level: s.level, gh: s.gameHours,
   };
   const stepSec = ECONOMY.offlineStepHours / ECONOMY.gameHoursPerSecond;
   let left = elapsed;
@@ -268,7 +272,7 @@ export function catchUp(s: GameState, nowMs = Date.now(), maxSeconds?: number): 
     research: s.research.done.length - before.research,
     contracts: (s.stats.contractsCompleted ?? 0) - before.contracts,
     levels: s.level - before.level,
-    compMoves: s.log.slice(0, Math.max(0, s.log.length - before.log + 50)).filter((l) => l.kind === 'comp').length,
+    compMoves: s.log.filter((l) => l.kind === 'comp' && l.t > before.gh).length,
   };
 }
 

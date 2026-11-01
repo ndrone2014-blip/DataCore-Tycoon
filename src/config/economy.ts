@@ -83,11 +83,19 @@ export const ECONOMY = {
   coolingMaintPerKW: 0.02,
 
   // ---- Revenue (per unit of capacity per game hour) ----
-  revenueRates: { cpu: 1.4, gpu: 45, storage: 0.15 } as Record<string, number>,
+  revenueRates: { cpu: 1.2, gpu: 30, storage: 0.12 } as Record<string, number>,
   /** Idle capacity rents on the spot market at this fraction of contract rates. */
   spotRateFraction: 0.55,
   /** Revenue-equivalent "compute units" per capacity unit — used for market supply math. */
-  cuPerUnit: { cpu: 0.9, gpu: 30, storage: 0.1 } as Record<string, number>,
+  cuPerUnit: { cpu: 1.2, gpu: 30, storage: 0.12 } as Record<string, number>,
+  /** Multiplier on every city's base demand (compute units ≈ $/hour at full price). */
+  demandScale: 2.5,
+  /** Linear demand growth per game day (fraction of base). */
+  demandGrowthPerDay: 0.004,
+  /** Market price curve: price = clamp(top - slope * supply/demand, floor, top). */
+  priceTop: 1.3,
+  priceSlope: 0.9,
+  priceFloor: 0.08,
 
   // ---- Operating expenses ----
   buildingMaintRate: 0.0000045, // per game hour of building value
@@ -136,7 +144,9 @@ export const ECONOMY = {
     contractComplete: 90,
     contractPer: 15_000,
     researchComplete: 140,
-    profitPer: 4_000,
+    /** XP per game hour = profitXpScale * profit^profitXpExp (diminishing returns). */
+    profitXpScale: 0.03,
+    profitXpExp: 0.75,
     newCity: 300,
     newCountry: 650,
   },
@@ -150,7 +160,7 @@ export const ECONOMY = {
 
 export function xpForLevel(level: number): number {
   if (level <= 1) return 0;
-  return Math.floor(260 * Math.pow(level - 1, 1.8));
+  return Math.floor(120 * Math.pow(level - 1, 2.5));
 }
 
 export const LEVEL_TITLES: { level: number; title: string }[] = [

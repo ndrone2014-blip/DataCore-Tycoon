@@ -118,7 +118,7 @@ function renderFallback(canvas: HTMLCanvasElement, spec: ChartSpec) {
       max = Math.max(max, pos);
       min = Math.min(min, neg);
     }
-  } else for (const d of spec.datasets) for (const v of d.data) { max = Math.max(max, v); min = Math.min(min, v); }
+  } else for (const d of spec.datasets) for (const v of d.data) { if (v == null) continue; max = Math.max(max, v); min = Math.min(min, v); }
   if (max === min) max = min + 1;
   const y = (v: number) => T + (H - T - B) * (1 - (v - min) / (max - min));
   const x = (i: number) => L + ((W - L - 8) * (i + 0.5)) / n;
@@ -149,7 +149,12 @@ function renderFallback(canvas: HTMLCanvasElement, spec: ChartSpec) {
       });
     } else {
       c.beginPath();
-      d.data.forEach((v, i) => (i ? c.lineTo(x(i), y(v)) : c.moveTo(x(i), y(v))));
+      let started = false;
+      d.data.forEach((v, i) => {
+        if (v == null) return;
+        if (started) c.lineTo(x(i), y(v));
+        else { c.moveTo(x(i), y(v)); started = true; }
+      });
       c.stroke();
     }
     c.fillText(d.label, L + di * 110, 12);

@@ -13,7 +13,7 @@ import { toast, sfx, emit } from '../core/bus';
 import { money, num } from '../core/format';
 import { cityById } from '../config/world';
 
-const MIN_SIZE: Record<CapType, number> = { cpu: 128, gpu: 8, storage: 960 };
+const MIN_SIZE: Record<CapType, number> = { cpu: 128, gpu: 8, storage: 480 };
 const STEP: Record<CapType, number> = { cpu: 64, gpu: 8, storage: 480 };
 
 export function contractRateMult(s: GameState, der: Derived): number {
@@ -31,22 +31,30 @@ export function generateOffer(s: GameState, der: Derived): Contract {
     if (r <= 0) { ctype = types[i]; break; }
   }
   const def = CUSTOMER_TYPES[ctype];
-  const owned = def.caps.filter((c) => der.totals.raw[c] > 0);
+  // Customers buy capacity in a specific market. Mostly where you operate, sometimes elsewhere (expansion bait).
+  const myCities = [...new Set(Object.values(s.facilities).filter((f) => !f.isHQ).map((f) => f.cityId))];
+  const cityPref = myCities.length && rand() < 0.75 ? pick(myCities) : pick(s.unlockedCities);
+  const cityCap = (c: CapType) => Object.values(s.facilities).filter((f) => f.cityId === cityPref).reduce((a, f) => a + (der.fac[f.id]?.raw[c] ?? 0), 0);
+  const owned = def.caps.filter((c) => cityCap(c) > 0);
   const cap: CapType = owned.length && rand() < 0.75 ? pick(owned) : pick(def.caps);
-  const base = Math.max(MIN_SIZE[cap], der.totals.raw[cap] * randRange(0.12, 0.45) * def.sizeMult);
+  // size: a slice of your local capacity, but never more than the market's unmet demand allows
+  const price = der.cityPrice[cityPref] ?? 1;
+  const headroomCU = Math.max(der.cityDemand[cityPref] * 0.08, der.cityDemand[cityPref] - der.citySupply[cityPref] * 0.85);
+  const headroomUnits = headroomCU / ECONOMY.cuPerUnit[cap];
+  const base = Math.min(Math.max(cityCap(cap), MIN_SIZE[cap] * 2) * randRange(0.15, 0.5) * def.sizeMult, headroomUnits * randRange(0.15, 0.4));
   const amount = Math.max(MIN_SIZE[cap], Math.round(base / STEP[cap]) * STEP[cap]);
   const label = pick(def.contractTypes);
   const longTerm = label.startsWith('Long-term');
   const days = Math.round(randRange(def.days[0], def.days[1]) * (longTerm ? 1.5 : 1));
-  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * randRange(0.92, 1.15) * (longTerm ? 0.95 : 1);
+  // contract prices follow the local market (oversupplied cities pay less)
+  const marketFactor = 0.35 + 0.65 * Math.min(1.2, price);
+  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
   const lifetime = randRange(ECONOMY.offerLifetimeHours[0], ECONOMY.offerLifetimeHours[1]);
-  const unlocked = s.unlockedCities;
-  const cityPref = rand() < 0.3 ? pick(unlocked) : undefined;
   return {
     id: newId(s, 'ct'),
     customer: customerName(ctype, rand),
     ctype, label, cap, amount,
-    ratePerHour: Math.round(rate * (cityPref ? 1.1 : 1) * 100) / 100,
+    ratePerHour: Math.round(rate * 100) / 100,
     hours: days * 24, hoursLeft: days * 24,
     sla: def.sla, security: def.security,
     bonus: longTerm || days > 30 ? Math.round(rate * randRange(8, 20)) : 0,

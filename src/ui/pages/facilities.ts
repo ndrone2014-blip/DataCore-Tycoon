@@ -2,7 +2,7 @@
 
 import type { App } from '../app';
 import { money, num, pct, esc, power, area, gameDate } from '../../core/format';
-import { stat, empty, btn, gauge, confirmDialog, bar } from '../components';
+import { stat, empty, btn, gauge, confirmDialog, bar, openModal, closeModal } from '../components';
 import { chart } from '../charts';
 import { EQUIPMENT, equipmentById, blueprintById, CAP_LABEL, type EquipmentDef } from '../../config/buildings';
 import { cityById } from '../../config/world';
@@ -109,6 +109,7 @@ function renderFacility(app: App, id: string): string {
         <span>PUE (power efficiency)</span><b>${st.pue.toFixed(2)}</b>
         <span>Backup power</span><b>${power(st.backup)}${st.backup < st.itLoad ? ' <span class="warn-t">(partial)</span>' : ''}</b>
         <span>Equipment performance</span><b>${pct(st.perf)}</b>
+        <span>Campus synergy</span><b>${st.campus > 0 ? `<span class="pos">+${pct(st.campus)}</span>` : '<span class="muted">Build neighbors in this block</span>'}</b>
         <span>Power / cooling / network</span><b>${pct(st.powerFactor)} · ${pct(st.coolingFactor)} · ${pct(st.networkFactor)}</b>
       </div>
     </div>
@@ -184,8 +185,16 @@ export function facilityActions(app: App) {
     repairDC: (el: HTMLElement) => app.run(() => repair(app.s, el.dataset.id!)),
     renameDC: (el: HTMLElement) => {
       const f = app.s.facilities[el.dataset.id!];
-      const name = prompt('Rename facility', f.name);
-      if (name) app.run(() => renameFacility(app.s, f.id, name));
+      app.ui.renameId = f.id;
+      app.ui.renameVal = f.name;
+      openModal(() => `<h2>Rename facility</h2><label class="set-row" style="grid-template-columns:1fr"><input type="text" id="rename-input" value="${esc(app.ui.renameVal)}" maxlength="40" data-change="renameVal" data-live></label>
+        <div class="row gap end mt"><button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn primary" data-act="renameSave">Save</button></div>`);
+      setTimeout(() => (document.getElementById('rename-input') as HTMLInputElement | null)?.select(), 50);
+    },
+    renameSave: () => {
+      const v = String(app.ui.renameVal ?? '').trim();
+      if (v) app.run(() => renameFacility(app.s, app.ui.renameId, v));
+      closeModal();
     },
     decommission: (el: HTMLElement) => {
       const f = app.s.facilities[el.dataset.id!];
@@ -198,6 +207,7 @@ export function facilityActions(app: App) {
 
 export function facilityChanges(app: App) {
   return {
+    renameVal: (el: HTMLElement) => { app.ui.renameVal = (el as HTMLInputElement).value; },
     eqFacility: (el: HTMLElement) => { app.ui.eqFacility = (el as HTMLSelectElement).value; app.render(); },
     autoRepair: (el: HTMLElement) => {
       const f = app.s.facilities[el.dataset.id!];
