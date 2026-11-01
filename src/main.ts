@@ -11,6 +11,9 @@ import { esc, money, duration } from './core/format';
 import { unlockAudio, playSfx } from './audio/sound';
 import { startTitleScene, stopTitleScene } from './ui/titleScene';
 
+declare const __GAME_VERSION__: string;
+export const GAME_VERSION = typeof __GAME_VERSION__ !== 'undefined' ? __GAME_VERSION__ : 'dev';
+(window as any).__GAME_VERSION__ = GAME_VERSION;
 const app = new App();
 (window as any).__app = app;
 installDelegation(document);
@@ -35,7 +38,7 @@ function titleScreen(hasSave: { name: string; level: number; savedAt: number } |
         <button class="btn ${hasSave ? 'ghost' : 'primary'} xl" data-act="bootNew">New company</button>
         <button class="btn ghost" data-act="bootImport">Import save file</button>
       </div>
-      <p class="boot-foot">Single-player · Autosaves locally · Developed by Drone Hive Studios | Developer @ndrone40</p>
+      <p class="boot-foot">Single-player · Autosaves locally · Developed by Drone Hive Studios | Developer @ndrone40<br><span class="ver">${GAME_VERSION}</span></p>
     </div>`;
   startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
 }

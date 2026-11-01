@@ -175,7 +175,7 @@ export function renderSettings(app: App): string {
       <h3 class="mt">⌨️ Shortcuts</h3>
       <div class="kv small"><span>Pause / resume</span><b>Space</b><span>Game speed</span><b>1 · 2 · 3</b><span>World map</span><b>M</b><span>Back / close</span><b>Esc</b><span>Save</span><b>Ctrl+S</b></div>
       <h3 class="mt">ℹ️ About</h3>
-      <p class="small muted">AI Data Center Empire · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
+      <p class="small muted">AI Data Center Empire <b>${(window as any).__GAME_VERSION__ ?? ''}</b> · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
     </div>
   </div>`;
 }

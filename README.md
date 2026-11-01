@@ -20,6 +20,10 @@ or `python3 -m http.server 8080` and open http://localhost:8080.
 
 **Option 3: GitHub Pages.** In the repository's **Settings → Pages**, choose *Deploy from a branch*, branch `main`, folder `/ (root)`. The game will be live at `https://<user>.github.io/<repo>/`.
 
+**Option 4: Netlify.** Connect the repository; `netlify.toml` tells Netlify to publish the folder as-is (no build step). Note that on Netlify's credit-based Free plan every production deploy uses credits, so each push to `main` counts.
+
+The current build version is shown at the bottom of the title screen and in Settings → About, so you can confirm which version a site is serving.
+
 An internet connection is used for real map tiles, the 3D engine and charts. Without it the game still runs fully using built-in offline fallbacks (simplified world map, isometric property view, built-in charts).
 
 ## Develop

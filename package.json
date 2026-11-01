@@ -1,6 +1,6 @@
 {
   "name": "ai-datacenter-empire",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "private": true,
   "description": "AI Data Center Empire — a browser-based 3D business & city-building simulator.",
   "scripts": {

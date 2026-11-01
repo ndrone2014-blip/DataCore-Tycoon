@@ -1,0 +1,11 @@
+# The game is pre-built (dist/game.js is committed), so Netlify only needs to
+# publish the folder — no build step, no build minutes.
+[build]
+  publish = "."
+  command = ""
+
+# Always fetch the newest game files so updates show up immediately.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache"
