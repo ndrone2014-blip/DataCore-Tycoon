@@ -13,6 +13,7 @@ import { createMapLibreEngine, darkify, fallbackStyle } from './maplibreEngine';
 import { createCanvasEngine } from './canvasEngine';
 import { fallbackLand } from './fallbackGeo';
 import { loadMapLibre, loadWorldGeo, fetchJson, CDN } from '../lib/loader';
+import { allCityscapes } from '../world/cityscape';
 import { emit, toast } from '../core/bus';
 import { esc } from '../core/format';
 
@@ -93,6 +94,14 @@ export class MapController {
       f.properties = { ...(f.properties ?? {}), iso: c ? c.id : '', playable: !!c, name: f.properties?.name ?? '' };
     }
     engine.setCountries(fc);
+    // static surrounding cities (thousands of decorative buildings)
+    const ground: any[] = [], parks: any[] = [], skyB: any[] = [];
+    for (const cs of allCityscapes()) {
+      ground.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [cs.ground] } });
+      for (const p of cs.parks) parks.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [p.poly] } });
+      for (const b of cs.buildings) skyB.push({ type: 'Feature', properties: { id: b.id, height: b.height, base: 0, color: b.color, kind: b.kind, sky: true, seed: b.seed }, geometry: { type: 'Polygon', coordinates: [b.poly] } });
+    }
+    engine.setCityscape({ ground: { type: 'FeatureCollection', features: ground }, parks: { type: 'FeatureCollection', features: parks }, buildings: { type: 'FeatureCollection', features: skyB } });
     this.buildMarkers();
     this.refresh();
     this.flyWorld(0);

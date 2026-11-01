@@ -56,7 +56,7 @@ export const METRICS: Record<string, Metric> = {
 
 function zoneOfParcel(pid: string): string | undefined {
   const city = pid.split('-')[0];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 8; i++) {
     const z = getZone(`${city}-z${i}`);
     if (z && z.parcelIds.includes(pid)) return z.id;
   }

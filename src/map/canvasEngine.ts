@@ -57,6 +57,7 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
   let countries: FC = empty();
   let hl: string | null = null;
   let city: CityData = { plates: empty(), streets: empty(), parcels: empty(), buildings: empty(), zones: empty() };
+  let sky = { ground: empty(), parks: empty(), buildings: empty() };
   let selected: string | null = null;
   let hover: string | null = null;
   let sens = 1;
@@ -236,13 +237,28 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     ctx.fillRect(0, 0, W, H);
   }
 
+  // quick reject for features belonging to other cities (cheap lng/lat test before projecting)
+  const near = (f: any, span: number) => {
+    const c0 = f.geometry.coordinates[0][0];
+    return Math.abs(c0[0] - center[0]) < span * 1.6 && Math.abs(c0[1] - center[1]) < span;
+  };
+
   function drawCity() {
     const now = performance.now();
+    const span = (Math.max(W, H) * 1.5 * 360) / ws() + 0.004;
     const alpha = Math.min(1, (zoom - 10) / 2);
     const night = lighting.night;
     ctx.globalAlpha = alpha;
     const mpp = (78271.517 * Math.cos((center[1] * Math.PI) / 180)) / Math.pow(2, zoom);
     const pxm = 1 / mpp; // pixels per meter
+    // surrounding city ground
+    for (const f of sky.ground.features) {
+      if (!near(f, span + 0.05)) continue;
+      ctx.beginPath();
+      path(f.geometry.coordinates[0]);
+      ctx.fillStyle = shade('#111a2a', 1 - night * 0.3);
+      ctx.fill();
+    }
     // district plate
     for (const f of city.plates.features) {
       ctx.beginPath();
@@ -335,8 +351,30 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
         });
       }
     }
+    // parks with tree canopies
+    for (const f of sky.parks.features) {
+      if (!near(f, span)) continue;
+      ctx.beginPath();
+      path(f.geometry.coordinates[0]);
+      ctx.fillStyle = pattern('grass') ?? '#1d3324';
+      ctx.fill();
+      if (zoom >= 14) {
+        const ring = f.geometry.coordinates[0];
+        const [ax, ay] = toScreen(ring[0][0], ring[0][1]), [bx, by] = toScreen(ring[2][0], ring[2][1]);
+        const nT = Math.min(40, Math.floor(Math.abs((bx - ax) * (by - ay)) / 260));
+        for (let k = 0; k < nT; k++) {
+          const tx = ax + (bx - ax) * hash(`${ring[0][0]}${k}`), ty = ay + (by - ay) * hash(`${ring[0][1]}y${k}`);
+          const rr = Math.max(2, 4 * pxm);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.beginPath(); ctx.arc(tx + rr * 0.5, ty + rr * 0.3, rr, 0, 6.3); ctx.fill();
+          ctx.fillStyle = shade(['#2f5a35', '#3a6b3e', '#27492c'][k % 3], 1 - night * 0.5);
+          ctx.beginPath(); ctx.arc(tx, ty - rr * 0.4, rr, 0, 6.3); ctx.fill();
+        }
+      }
+    }
     // parcels: textured ground per status
     for (const f of city.parcels.features) {
+      if (!near(f, span)) continue;
       const pr = f.properties;
       ctx.beginPath();
       path(f.geometry.coordinates[0]);
@@ -363,6 +401,7 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
       }
     }
     for (const f of city.zones.features) {
+      if (!near(f, span)) continue;
       ctx.beginPath();
       path(f.geometry.coordinates[0]);
       ctx.setLineDash([8, 5]);
@@ -375,7 +414,7 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     }
     // buildings: shadows first, then painter-sorted 2.5D blocks
     const lift = 1.05;
-    const items = city.buildings.features.map((f: any) => {
+    const items = [...city.buildings.features.filter((f: any) => near(f, span)), ...sky.buildings.features.filter((f: any) => near(f, span))].map((f: any) => {
       const ring: number[][] = f.geometry.coordinates[0];
       const pts = ring.map((p) => toScreen(p[0], p[1]));
       return { f, pts, y: Math.max(...pts.map((p) => p[1])) };
@@ -384,7 +423,9 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     // ground shadows (sun from the upper-left)
     ctx.save();
     ctx.fillStyle = `rgba(0,0,0,${0.35 * (1 - night * 0.6)})`;
+    const lod = zoom < 14.2; // far: flat shading, fewer details
     for (const { f, pts } of items) {
+      if (zoom < 14.2 && f.properties.sky) continue;
       const h = f.properties.height * pxm * lift;
       const sx = h * 0.55, sy = h * 0.25;
       ctx.beginPath();
@@ -413,10 +454,14 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
         ctx.lineTo(x2, y2 - b - h);
         ctx.lineTo(x1, y1 - b - h);
         ctx.closePath();
-        const wg = ctx.createLinearGradient(0, Math.min(y1, y2) - b - h, 0, Math.max(y1, y2) - b);
         const sideF = x2 > x1 ? 0.62 : 0.8;
-        wg.addColorStop(0, shade(col, sideF * 1.08));
-        wg.addColorStop(1, shade(col, sideF * 0.7));
+        let wg: string | CanvasGradient;
+        if (lod) wg = shade(col, sideF * 0.9 * (1 - night * 0.35));
+        else {
+          wg = ctx.createLinearGradient(0, Math.min(y1, y2) - b - h, 0, Math.max(y1, y2) - b);
+          wg.addColorStop(0, shade(col, sideF * 1.08 * (1 - night * 0.35)));
+          wg.addColorStop(1, shade(col, sideF * 0.7 * (1 - night * 0.35)));
+        }
         ctx.fillStyle = construction ? 'rgba(245,158,11,0.18)' : wg;
         ctx.fill();
         if (construction) {
@@ -426,13 +471,14 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
         }
         // windows
         if (!construction && !demo && h > 8 && zoom >= 14) {
-          const rows = Math.min(14, Math.floor(h / (pr.kind === 'office' ? 6 : 9)));
+          const dense = pr.kind === 'office' || pr.kind === 'tower' || pr.kind === 'glass' || pr.kind === 'apartment' || pr.kind === 'brick';
+          const rows = Math.min(pr.sky ? 40 : 14, Math.floor(h / (dense ? 5 : 9)));
           const cols = Math.max(1, Math.floor(Math.hypot(x2 - x1, y2 - y1) / 7));
           for (let r = 1; r <= rows; r++) {
             for (let c = 0; c < cols; c++) {
               const tt = (c + 0.5) / cols, vv = r / (rows + 1);
               const wx = x1 + (x2 - x1) * tt, wy = y1 + (y2 - y1) * tt - b - h * vv;
-              const lit = hash(`${pr.id}${i}${r}${c}`) < (pr.kind === 'facility' || pr.kind === 'hq' ? 0.85 : 0.55);
+              const lit = hash(`${pr.id}${i}${r}${c}`) < (pr.kind === 'facility' || pr.kind === 'hq' ? 0.85 : pr.kind === 'glass' || pr.kind === 'tower' ? 0.6 : 0.5);
               if (night > 0.15 && lit) {
                 ctx.fillStyle = pr.kind === 'facility' ? `rgba(125,211,252,${0.5 + night * 0.5})` : `rgba(255,214,140,${0.4 + night * 0.6})`;
               } else ctx.fillStyle = 'rgba(160,190,230,0.22)';
@@ -446,15 +492,33 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
       ctx.beginPath();
       pts.forEach(([x, y]: number[], i: number) => (i ? ctx.lineTo(x, y - b - h) : ctx.moveTo(x, y - b - h)));
       ctx.closePath();
-      ctx.fillStyle = construction ? 'rgba(250,204,21,0.15)' : shade(col, 1.12);
+      ctx.fillStyle = construction ? 'rgba(250,204,21,0.15)' : shade(col, 1.12 * (1 - night * 0.35));
       ctx.fill();
       ctx.strokeStyle = construction ? 'rgba(250,204,21,0.9)' : 'rgba(0,0,0,0.35)';
       ctx.lineWidth = 0.7;
       ctx.stroke();
       const cx = pts.slice(0, -1).reduce((a: number, p: number[]) => a + p[0], 0) / (pts.length - 1);
       const cy = pts.slice(0, -1).reduce((a: number, p: number[]) => a + p[1], 0) / (pts.length - 1) - b - h;
+      if (pr.sky && (pr.kind === 'tower' || pr.kind === 'glass') && h > 60 * pxm) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.08 + (1 - night) * 0.08;
+        ctx.fillStyle = '#9fd0ff';
+        ctx.beginPath();
+        pts.forEach(([x, y]: number[], k: number) => (k ? ctx.lineTo(x, y - b - h) : ctx.moveTo(x, y - b - h)));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        if (pr.height > 110) {
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+          const ax = pts[0][0] * 0.5 + pts[2][0] * 0.5, ay = (pts[0][1] + pts[2][1]) / 2 - b - h;
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, ay - 14 * pxm); ctx.stroke();
+          if (Math.sin(now / 500 + pr.seed * 20) > 0.3) { ctx.fillStyle = '#ff3b3b'; ctx.beginPath(); ctx.arc(ax, ay - 14 * pxm, 1.8, 0, 6.3); ctx.fill(); }
+        }
+      }
       // rooftop details
-      if (zoom >= 15 && (pr.kind === 'facility' || pr.kind === 'existing')) {
+      if (zoom >= 15 && (pr.kind === 'facility' || pr.kind === 'existing' || pr.kind === 'office' || pr.kind === 'apartment')) {
         ctx.fillStyle = pr.kind === 'facility' ? '#e2e8f0' : 'rgba(200,205,215,0.7)';
         const u = Math.max(2, 3.4 * pxm);
         for (let k = 0; k < (pr.kind === 'facility' ? 6 : 3); k++) ctx.fillRect(cx - u * 3 + (k % 3) * u * 2.2, cy - u + Math.floor(k / 3) * u * 2.2, u * 1.4, u * 1.4);
@@ -544,7 +608,7 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
       dirty = true;
       moveCbs.forEach((cb) => cb());
     }
-    if (zoom >= 12 && t - lastAnim > 33) {
+    if (zoom >= 13.5 && t - lastAnim > 40) {
       lastAnim = t;
       dirty = true;
     }
@@ -670,6 +734,10 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     },
     setCityData: (d) => {
       city = d;
+      dirty = true;
+    },
+    setCityscape: (d) => {
+      sky = d;
       dirty = true;
     },
     setSelectedParcel: (id) => {

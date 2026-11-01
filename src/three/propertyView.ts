@@ -10,6 +10,7 @@ import { stageOf } from '../systems/construction';
 import { equipmentById, blueprintById } from '../config/buildings';
 import { loadThree } from '../lib/loader';
 import { getLighting } from '../core/timeOfDay';
+import { getCityscape } from '../world/cityscape';
 import { makeTextures, createSky, createTrees, createTraffic, createLamps, glowTexture, type Lane } from './environment';
 import type { Derived } from '../systems/derive';
 
@@ -45,7 +46,7 @@ export async function createThreeView(container: HTMLElement, getS: () => GameSt
   const TEX = makeTextures(THREE);
   const sky = createSky(THREE);
   scene.add(sky.mesh);
-  scene.fog = new THREE.Fog(0x9fb8d6, 320, 1100);
+  scene.fog = new THREE.Fog(0x9fb8d6, 450, 1700);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 3000);
   const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x2a2a30, 0.85);
   scene.add(hemi);
@@ -234,7 +235,7 @@ export async function createThreeView(container: HTMLElement, getS: () => GameSt
     const s = getS();
     const lay = getCityLayout(parcel.cityId);
     const R = 280;
-    const CLIP = 700;
+    const CLIP = 1000;
     const mLng = (parcel.rect.x1 - parcel.rect.x0) / (parcel.poly[1][0] - parcel.poly[0][0]);
     const mLat = (parcel.rect.y1 - parcel.rect.y0) / (parcel.poly[2][1] - parcel.poly[1][1]);
     const lanes: Lane[] = [];
@@ -270,7 +271,7 @@ export async function createThreeView(container: HTMLElement, getS: () => GameSt
       const la = toLocal(ax, ay), lb = toLocal(bx, by);
       const vertical = Math.abs(la.x - lb.x) < 1;
       const off = vertical ? Math.abs(la.x) : Math.abs(la.z);
-      if (off > R + 120) continue;
+      if (off > 1000) continue;
       // clip the street to the visible neighbourhood (fog hides the ends)
       let p0: number, p1: number;
       if (vertical) { p0 = Math.max(-CLIP, Math.min(la.z, lb.z)); p1 = Math.min(CLIP, Math.max(la.z, lb.z)); }
@@ -360,6 +361,60 @@ export async function createThreeView(container: HTMLElement, getS: () => GameSt
       dashPos.forEach(([x, z, r], i) => { Q.setFromAxisAngle(up, r); P.set(x, 0.09, z); M.compose(P, Q, S); dm.setMatrixAt(i, M); });
       dm.receiveShadow = true;
       context.add(dm);
+    }
+    // ---- surrounding skyline (non-purchasable city) ----
+    const cs = getCityscape(parcel.cityId);
+    const skyMats = new Map<string, any>();
+    const skyMat = (kind: string, color: string, w: number, h: number) => {
+      const tall = h > 30;
+      const key = `${kind}|${color}|${Math.round(w / 8)}|${Math.round(h / 10)}`;
+      if (skyMats.has(key)) return skyMats.get(key);
+      const base = windowTex(kind === 'house' || kind === 'warehouse' || kind === 'low' ? 'ribs' : 'office', color).clone();
+      base.needsUpdate = true;
+      base.repeat.set(Math.max(1, w / (tall ? 10 : 14)), Math.max(1, h / (tall ? 12 : 14)));
+      const glassy = kind === 'glass' || kind === 'tower';
+      const m = nightMat(new THREE.MeshStandardMaterial({ map: base, color: new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.35), metalness: glassy ? 0.75 : 0.15, roughness: glassy ? 0.2 : 0.7, emissive: kind === 'house' || kind === 'warehouse' ? 0x000000 : 0xffd29a, emissiveMap: base, emissiveIntensity: 0.05 }), 0.04, kind === 'house' || kind === 'warehouse' ? 0 : glassy ? 1.1 : 0.9);
+      skyMats.set(key, m);
+      return m;
+    };
+    const roofMat = mat(0x3a4250, { roughness: 0.8 });
+    for (const b of cs.buildings) {
+      const cx = (b.rect.x0 + b.rect.x1) / 2, cy = (b.rect.y0 + b.rect.y1) / 2;
+      const l = toLocal(cx, cy);
+      const dist = Math.hypot(l.x, l.z);
+      if (dist > 1100) continue;
+      const w = b.rect.x1 - b.rect.x0, d = b.rect.y1 - b.rect.y0;
+      if (dist > 650 && b.height < 30) continue; // far low-rise hidden by fog anyway
+      const mesh = box(w, b.height, d, skyMat(b.kind, b.color, w, b.height), l.x, 0, l.z, dist < 500);
+      context.add(mesh);
+      context.add(box(w + 0.6, 1, d + 0.6, roofMat, l.x, b.height, l.z, false));
+      if (b.kind === 'house') {
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 4, 4), mat(0x7a3b2e, { roughness: 0.9 }));
+        roof.rotation.y = Math.PI / 4;
+        roof.position.set(l.x, b.height + 2, l.z);
+        roof.scale.set(w / Math.max(w, d), 1, d / Math.max(w, d));
+        context.add(roof);
+      } else if (b.height > 110) {
+        context.add(cyl(0.4, 18, mat(0x9ca3af, { metalness: 0.8 }), l.x, b.height + 1, l.z, 6));
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+        beacon.position.set(l.x, b.height + 19.5, l.z);
+        context.add(beacon);
+        ctxBeacons.push(beacon);
+      } else if (dist < 450) {
+        for (let k = 0; k < Math.min(4, Math.floor(w / 8)); k++) context.add(box(2.4, 1.4, 2.4, mat(0xbfc6cf, { metalness: 0.5 }), l.x - w / 3 + k * 6, b.height + 1, l.z));
+      }
+      if (dist < 420 && b.kind !== 'tower' && b.kind !== 'glass' && Math.random() < 0.4) treePos.push({ x: l.x + w / 2 + 3, z: l.z + d / 2 + 3, s: 0.9 });
+    }
+    for (const pk of cs.parks) {
+      const cx = (pk.rect.x0 + pk.rect.x1) / 2, cy = (pk.rect.y0 + pk.rect.y1) / 2;
+      const l = toLocal(cx, cy);
+      if (Math.hypot(l.x, l.z) > 700) continue;
+      const w = pk.rect.x1 - pk.rect.x0, d = pk.rect.y1 - pk.rect.y0;
+      const gt = TEX.grass.clone();
+      gt.needsUpdate = true;
+      gt.repeat.set(w / 16, d / 16);
+      flat(new THREE.MeshStandardMaterial({ map: gt, roughness: 1, color: 0xc8e0c0 }), w, d, l.x, l.z, 0.08);
+      for (let k = 0; k < 22; k++) treePos.push({ x: l.x + (Math.random() - 0.5) * w * 0.9, z: l.z + (Math.random() - 0.5) * d * 0.9, s: 0.9 + Math.random() * 0.6 });
     }
     context.add(createTrees(THREE, treePos));
     lamps = createLamps(THREE, lampPos);

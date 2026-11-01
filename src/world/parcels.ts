@@ -85,6 +85,9 @@ export interface CityLayout {
   bounds: [number, number, number, number];
 }
 
+const mod = (a: number, n: number) => ((a % n) + n) % n;
+/** Rings of decorative (non-purchasable) city blocks around the district. */
+export const CITY_RINGS = 5;
 const BX = 6;
 const BY = 5;
 const BW = 170;
@@ -144,7 +147,7 @@ export function allParcels(): ParcelDef[] {
 }
 
 function generate(city: CityDef): CityLayout {
-  const r = mulberry32(hashString('district:' + city.id));
+  let r = mulberry32(hashString('district:' + city.id));
   const [clng, clat] = city.district;
   const mLat = 1 / 111320;
   const mLng = 1 / (111320 * Math.cos((clat * Math.PI) / 180));
@@ -153,15 +156,18 @@ function generate(city: CityDef): CityLayout {
   const toLL = (x: number, y: number): [number, number] => [clng + (x - totalW / 2) * mLng, clat + (y - totalH / 2) * mLat];
   const rectPoly = (x0: number, y0: number, x1: number, y1: number): [number, number][] => [toLL(x0, y0), toLL(x1, y0), toLL(x1, y1), toLL(x0, y1), toLL(x0, y0)];
 
-  const plate = rectPoly(-40, -40, totalW + 40, totalH + 40);
+  // purchasable district = original grid + 2 expansion rings; streets continue through the surrounding city
+  const PX = 2 * (BW + ST), PY = 2 * (BH + ST);
+  const plate = rectPoly(-PX - 40, -PY - 40, totalW + PX + 40, totalH + PY + 40);
+  const CX = CITY_RINGS * (BW + ST), CY = CITY_RINGS * (BH + ST);
   const streets: CityLayout['streets'] = [];
-  for (let i = 0; i <= BX; i++) {
+  for (let i = -2 - CITY_RINGS; i <= BX + 2 + CITY_RINGS; i++) {
     const x = i * (BW + ST) + ST / 2;
-    streets.push({ name: STREET_NAMES[i % STREET_NAMES.length], line: [toLL(x, 0), toLL(x, totalH)] });
+    streets.push({ name: STREET_NAMES[mod(i, STREET_NAMES.length)], line: [toLL(x, -PY - CY), toLL(x, totalH + PY + CY)] });
   }
-  for (let j = 0; j <= BY; j++) {
+  for (let j = -2 - CITY_RINGS; j <= BY + 2 + CITY_RINGS; j++) {
     const y = j * (BH + ST) + ST / 2;
-    streets.push({ name: STREET_NAMES[(j + 7) % STREET_NAMES.length], line: [toLL(0, y), toLL(totalW, y)] });
+    streets.push({ name: STREET_NAMES[mod(j + 7, STREET_NAMES.length)], line: [toLL(-PX - CX, y), toLL(totalW + PX + CX, y)] });
   }
 
   // Choose zone superblocks (pairs of adjacent blocks).
@@ -247,93 +253,126 @@ function generate(city: CityDef): CityLayout {
   };
 
   const GAP = 3;
-  for (let j = 0; j < BY; j++) {
-    for (let i = 0; i < BX; i++) {
-      const bx0 = ST + i * (BW + ST) + 4;
-      const by0 = ST + j * (BH + ST) + 4;
-      const bx1 = bx0 + BW - 8;
-      const by1 = by0 + BH - 8;
-      const blockId = `${city.id}-b${i}_${j}`;
-      const street = STREET_NAMES[(i + j * 3) % STREET_NAMES.length];
-      const zi = zoneCells.get(`${i},${j}`);
-      if (zi !== undefined) {
-        const zs = zoneStarts[zi];
-        if (zs.i !== i) continue; // second half handled with first
-        // superblock spanning two blocks plus the street between
-        const zx0 = bx0;
-        const zx1 = ST + (i + 1) * (BW + ST) + BW - 4;
-        const zoneId = `${city.id}-z${zi}`;
-        const cols = 3 + Math.floor(r() * 2);
-        const rows = 2;
-        const ids: string[] = [];
-        const xc = split(zx0, zx1, cols);
-        const yc = split(by0, by1, rows);
-        for (let a = 0; a < cols; a++) {
-          for (let b = 0; b < rows; b++) {
-            const roll = r();
-            const type: PropertyType = roll < 0.4 ? 'empty_lot' : roll < 0.7 ? 'warehouse' : roll < 0.9 ? 'industrial' : 'retail';
-            const p = makeParcel(blockId, type, xc[a] + GAP, yc[b] + GAP, xc[a + 1] - GAP, yc[b + 1] - GAP, street, zoneId, 2);
-            // zone lots: honour zone pricing ranges (empty lots in a zone are larger than normal)
-            if (type === 'empty_lot') p.basePrice = Math.round(Math.min(900_000, Math.max(120_000, p.area * 95)) / 1000) * 1000;
-            parcels.push(p);
-            ids.push(p.id);
-          }
+  const genBlock = (i: number, j: number, outer = false) => {
+    const bx0 = ST + i * (BW + ST) + 4;
+    const by0 = ST + j * (BH + ST) + 4;
+    const bx1 = bx0 + BW - 8;
+    const by1 = by0 + BH - 8;
+    const blockId = `${city.id}-b${i}_${j}`;
+    const street = STREET_NAMES[mod(i + j * 3, STREET_NAMES.length)];
+    const zi = zoneCells.get(`${i},${j}`);
+    if (zi !== undefined) {
+      const zs = zoneStarts[zi];
+      if (zs.i !== i) return; // second half handled with first
+      // superblock spanning two blocks plus the street between
+      const zx0 = bx0;
+      const zx1 = ST + (i + 1) * (BW + ST) + BW - 4;
+      const zoneId = `${city.id}-z${zi}`;
+      const cols = 3 + Math.floor(r() * 2);
+      const rows = 2;
+      const ids: string[] = [];
+      const xc = split(zx0, zx1, cols);
+      const yc = split(by0, by1, rows);
+      for (let a = 0; a < cols; a++) {
+        for (let b = 0; b < rows; b++) {
+          const roll = r();
+          const type: PropertyType = roll < 0.4 ? 'empty_lot' : roll < 0.7 ? 'warehouse' : roll < 0.9 ? 'industrial' : 'retail';
+          const p = makeParcel(blockId, type, xc[a] + GAP, yc[b] + GAP, xc[a + 1] - GAP, yc[b + 1] - GAP, street, zoneId, 2);
+          // zone lots: honour zone pricing ranges (empty lots in a zone are larger than normal)
+          if (type === 'empty_lot') p.basePrice = Math.round(Math.min(900_000, Math.max(120_000, p.area * 95)) / 1000) * 1000;
+          parcels.push(p);
+          ids.push(p.id);
         }
-        const zname = `${AREA_NAMES[(i * 7 + j * 3 + zi * 5) % AREA_NAMES.length]} ${j === 2 ? 'Commerce' : 'Industrial'} Development Zone`;
-        const siteId = `${city.id}-s${zi}`;
-        const zpoly = rectPoly(zx0 - 2, by0 - 2, zx1 + 2, by1 + 2);
-        const zarea = Math.round((zx1 - zx0) * (by1 - by0));
-        zones.push({ id: zoneId, cityId: city.id, name: zname, parcelIds: ids, siteId, poly: zpoly, center: toLL((zx0 + zx1) / 2, (by0 + by1) / 2), area: zarea });
-        sites.push({
-          id: siteId, cityId: city.id, blockId, zoneId, type: 'commercial_zone',
-          name: zname.replace('Development Zone', 'Consolidated Campus Site'),
-          address: `${zname} (consolidated)`,
-          poly: rectPoly(zx0, by0, zx1, by1), footprintPoly: rectPoly(zx0 + 6, by0 + 6, zx1 - 6, by1 - 6),
-          rect: { x0: zx0, y0: by0, x1: zx1, y1: by1 }, center: toLL((zx0 + zx1) / 2, (by0 + by1) / 2),
-          area: zarea, buildingArea: 0, buildingFloors: 0, buildingHeight: 0, basePrice: 0,
-          zoning: ZONINGS.PD, potential: 'Exceptional', restrictions: ['Max 9 floors', 'Max 80% lot coverage'],
-          isSite: true, members: ids,
-        });
-        continue;
       }
-      // regular block
-      const dx = (i + 0.5) / BX - 0.5;
-      const dy = (j + 0.5) / BY - 0.5;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const ring = d < 0.22 ? 0 : d < 0.42 ? 1 : 2;
-      const roll = r();
-      type Plan = { kind: 'single'; type: PropertyType } | { kind: 'grid'; cols: number; rows: number; types: PropertyType[] };
-      let plan: Plan;
-      if (ring === 0) {
-        plan = roll < 0.3 ? { kind: 'grid', cols: 2, rows: 1, types: ['premium', 'premium', 'office'] }
-          : roll < 0.8 ? { kind: 'grid', cols: 3, rows: 2, types: ['office', 'office', 'retail', 'restaurant', 'retail'] }
-          : { kind: 'single', type: 'shopping_center' };
-      } else if (ring === 1) {
-        plan = roll < 0.35 ? { kind: 'grid', cols: 3, rows: 1, types: ['warehouse', 'warehouse', 'office', 'industrial'] }
-          : roll < 0.75 ? { kind: 'grid', cols: 4, rows: 2, types: ['retail', 'restaurant', 'empty_lot', 'retail', 'office'] }
-          : roll < 0.9 ? { kind: 'single', type: 'shopping_center' }
-          : { kind: 'grid', cols: 2, rows: 1, types: ['office', 'warehouse'] };
-      } else {
-        plan = roll < 0.35 ? { kind: 'grid', cols: 3, rows: 1, types: ['industrial', 'warehouse', 'industrial'] }
-          : roll < 0.55 ? { kind: 'single', type: 'industrial_land' }
-          : { kind: 'grid', cols: 4, rows: 2, types: ['empty_lot', 'empty_lot', 'retail', 'restaurant', 'warehouse'] };
-      }
-      if (plan.kind === 'single') {
-        parcels.push(makeParcel(blockId, plan.type, bx0 + GAP, by0 + GAP, bx1 - GAP, by1 - GAP, street, undefined, ring));
-      } else {
-        const xc = split(bx0, bx1, plan.cols);
-        const yc = split(by0, by1, plan.rows);
-        for (let a = 0; a < plan.cols; a++) {
-          for (let b = 0; b < plan.rows; b++) {
-            const type = plan.types[Math.floor(r() * plan.types.length)];
-            parcels.push(makeParcel(blockId, type, xc[a] + GAP, yc[b] + GAP, xc[a + 1] - GAP, yc[b + 1] - GAP, street, undefined, ring));
-          }
+      const zname = `${AREA_NAMES[mod(i * 7 + j * 3 + zi * 5, AREA_NAMES.length)]} ${j === 2 ? 'Commerce' : 'Industrial'} Development Zone`;
+      const siteId = `${city.id}-s${zi}`;
+      const zpoly = rectPoly(zx0 - 2, by0 - 2, zx1 + 2, by1 + 2);
+      const zarea = Math.round((zx1 - zx0) * (by1 - by0));
+      zones.push({ id: zoneId, cityId: city.id, name: zname, parcelIds: ids, siteId, poly: zpoly, center: toLL((zx0 + zx1) / 2, (by0 + by1) / 2), area: zarea });
+      sites.push({
+        id: siteId, cityId: city.id, blockId, zoneId, type: 'commercial_zone',
+        name: zname.replace('Development Zone', 'Consolidated Campus Site'),
+        address: `${zname} (consolidated)`,
+        poly: rectPoly(zx0, by0, zx1, by1), footprintPoly: rectPoly(zx0 + 6, by0 + 6, zx1 - 6, by1 - 6),
+        rect: { x0: zx0, y0: by0, x1: zx1, y1: by1 }, center: toLL((zx0 + zx1) / 2, (by0 + by1) / 2),
+        area: zarea, buildingArea: 0, buildingFloors: 0, buildingHeight: 0, basePrice: 0,
+        zoning: ZONINGS.PD, potential: 'Exceptional', restrictions: ['Max 9 floors', 'Max 80% lot coverage'],
+        isSite: true, members: ids,
+      });
+      return;
+    }
+    // regular block
+    const dx = (i + 0.5) / BX - 0.5;
+    const dy = (j + 0.5) / BY - 0.5;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    const ring = d < 0.22 ? 0 : d < 0.42 ? 1 : 2;
+    const roll = r();
+    type Plan = { kind: 'single'; type: PropertyType } | { kind: 'grid'; cols: number; rows: number; types: PropertyType[] };
+    let plan: Plan;
+    if (ring === 0) {
+      plan = roll < 0.3 ? { kind: 'grid', cols: 2, rows: 1, types: ['premium', 'premium', 'office'] }
+        : roll < 0.8 ? { kind: 'grid', cols: 3, rows: 2, types: ['office', 'office', 'retail', 'restaurant', 'retail'] }
+        : { kind: 'single', type: 'shopping_center' };
+    } else if (ring === 1) {
+      plan = roll < 0.35 ? { kind: 'grid', cols: 3, rows: 1, types: ['warehouse', 'warehouse', 'office', 'industrial'] }
+        : roll < 0.75 ? { kind: 'grid', cols: 4, rows: 2, types: ['retail', 'restaurant', 'empty_lot', 'retail', 'office'] }
+        : roll < 0.9 ? { kind: 'single', type: 'shopping_center' }
+        : { kind: 'grid', cols: 2, rows: 1, types: ['office', 'warehouse'] };
+    } else {
+      plan = roll < 0.35 ? { kind: 'grid', cols: 3, rows: 1, types: ['industrial', 'warehouse', 'industrial'] }
+        : roll < 0.55 ? { kind: 'single', type: 'industrial_land' }
+        : { kind: 'grid', cols: 4, rows: 2, types: ['empty_lot', 'empty_lot', 'retail', 'restaurant', 'warehouse'] };
+    }
+    if (plan.kind === 'single') {
+      parcels.push(makeParcel(blockId, plan.type, bx0 + GAP, by0 + GAP, bx1 - GAP, by1 - GAP, street, undefined, ring));
+    } else {
+      const xc = split(bx0, bx1, plan.cols);
+      const yc = split(by0, by1, plan.rows);
+      for (let a = 0; a < plan.cols; a++) {
+        for (let b = 0; b < plan.rows; b++) {
+          const type = plan.types[Math.floor(r() * plan.types.length)];
+          parcels.push(makeParcel(blockId, type, xc[a] + GAP, yc[b] + GAP, xc[a + 1] - GAP, yc[b + 1] - GAP, street, undefined, ring));
         }
       }
     }
+  };
+  for (let j = 0; j < BY; j++) for (let i = 0; i < BX; i++) genBlock(i, j);
+
+  // ---- Expansion ring (v2): two extra rings of purchasable blocks around the original grid.
+  // Uses its own RNG and continues lot numbering, so original parcel ids stay identical.
+  r = mulberry32(hashString('ring:' + city.id));
+  const RING = 2;
+  const extraZones: { i: number; j: number }[] = [];
+  for (const j of [-1, BY]) {
+    const i = -1 + Math.floor(r() * (BX + 1));
+    extraZones.push({ i, j });
+  }
+  for (const z of extraZones) {
+    zoneCells.set(`${z.i},${z.j}`, zoneStarts.length);
+    zoneCells.set(`${z.i + 1},${z.j}`, zoneStarts.length);
+    zoneStarts.push(z);
+  }
+  for (let j = -RING; j < BY + RING; j++) {
+    for (let i = -RING; i < BX + RING; i++) {
+      if (i >= 0 && i < BX && j >= 0 && j < BY) continue;
+      genBlock(i, j, true);
+    }
   }
 
-  const sw = toLL(-60, -60);
-  const ne = toLL(totalW + 60, totalH + 60);
+  const sw = toLL(-PX - 60, -PY - 60);
+  const ne = toLL(totalW + PX + 60, totalH + PY + 60);
   return { city, plate, streets, parcels, zones, sites, bounds: [sw[0], sw[1], ne[0], ne[1]] };
+}
+
+/** Coordinate frame of a city's district (meters ↔ lng/lat), shared with the cityscape generator. */
+export function districtFrame(cityId: string) {
+  const city = cityById(cityId);
+  const [clng, clat] = city.district;
+  const mLat = 1 / 111320;
+  const mLng = 1 / (111320 * Math.cos((clat * Math.PI) / 180));
+  const totalW = BX * BW + (BX + 1) * ST;
+  const totalH = BY * BH + (BY + 1) * ST;
+  const toLL = (x: number, y: number): [number, number] => [clng + (x - totalW / 2) * mLng, clat + (y - totalH / 2) * mLat];
+  const fromLL = (lng: number, lat: number): [number, number] => [(lng - clng) / mLng + totalW / 2, (lat - clat) / mLat + totalH / 2];
+  return { city, toLL, fromLL, totalW, totalH, BX, BY, BW, BH, ST, mLng, mLat };
 }

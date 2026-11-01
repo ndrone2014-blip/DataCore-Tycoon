@@ -10,6 +10,8 @@ import { parcelState } from '../systems/property';
 import { stageOf } from '../systems/construction';
 import { blueprintById, equipmentById } from '../config/buildings';
 import { getLighting } from '../core/timeOfDay';
+import { getCityLayout, districtFrame } from '../world/parcels';
+import { getCityscape } from '../world/cityscape';
 
 function rgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace('#', ''), 16);
@@ -28,6 +30,36 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
   container.appendChild(canvas);
   const ctx = canvas.getContext('2d')!;
   let parcel: ParcelDef | null = null;
+  interface Nb { x: number; y: number; w: number; d: number; h: number; color: string; kind: string; id: string; parcelId?: string }
+  let neighbors: Nb[] = [];
+  let streetsLocal: [number, number, boolean][] = [];
+  function collectNeighbors() {
+    neighbors = [];
+    streetsLocal = [];
+    if (!parcel) return;
+    const cx0 = (parcel.rect.x0 + parcel.rect.x1) / 2, cy0 = (parcel.rect.y0 + parcel.rect.y1) / 2;
+    const R = Math.max(parcel.rect.x1 - parcel.rect.x0, parcel.rect.y1 - parcel.rect.y0) * 1.6 + 70;
+    const fr = districtFrame(parcel.cityId);
+    for (const st of getCityLayout(parcel.cityId).streets) {
+      const [ax, ay] = fr.fromLL(st.line[0][0], st.line[0][1]);
+      const [bx, by] = fr.fromLL(st.line[1][0], st.line[1][1]);
+      const vertical = Math.abs(ax - bx) < 1;
+      const off = vertical ? ax - cx0 : ay - cy0;
+      if (Math.abs(off) > R * 1.5) continue;
+      streetsLocal.push(vertical ? [off, 0, true] : [0, off, false]);
+    }
+    for (const p of getCityLayout(parcel.cityId).parcels) {
+      if (p.id === parcel.id) continue;
+      const x = (p.rect.x0 + p.rect.x1) / 2 - cx0, y = (p.rect.y0 + p.rect.y1) / 2 - cy0;
+      if (Math.abs(x) > R || Math.abs(y) > R) continue;
+      neighbors.push({ x, y, w: p.rect.x1 - p.rect.x0, d: p.rect.y1 - p.rect.y0, h: p.buildingHeight, color: PROPERTY_TYPE_INFO[p.type].color, kind: p.type, id: p.id, parcelId: p.id });
+    }
+    for (const b of getCityscape(parcel.cityId).buildings) {
+      const x = (b.rect.x0 + b.rect.x1) / 2 - cx0, y = (b.rect.y0 + b.rect.y1) / 2 - cy0;
+      if (Math.abs(x) > R * 1.4 || Math.abs(y) > R * 1.4) continue;
+      neighbors.push({ x, y, w: b.rect.x1 - b.rect.x0, d: b.rect.y1 - b.rect.y0, h: b.height, color: b.color, kind: b.kind, id: b.id });
+    }
+  }
   let visible = false;
   let xray = false;
   let rot = 0;
@@ -134,6 +166,23 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
     ctx.beginPath(); ctx.arc(tx, ty - r * 0.3, r, 0, 6.3); ctx.fill();
   };
 
+  function drawNeighbor(nb: Nb, s: GameState, night: number, tint: number, alpha: number) {
+    if (nb.parcelId) {
+      const st = parcelState(s, nb.parcelId);
+      const k = Math.sqrt(PROPERTY_TYPE_INFO[nb.kind as keyof typeof PROPERTY_TYPE_INFO]?.coverage || 0.5);
+      quadAt(nb.x, nb.y, nb.w, nb.d, 0.04, shade(st.status === 'cleared' || st.status === 'construction' ? '#4a3c2a' : '#2a313c', 1 - night * 0.5));
+      if (st.status === 'existing' && nb.h > 0) block(nb.x, nb.y, nb.w * k, nb.d * k, Math.max(4, nb.h), nb.color, 0, { alpha, windows: nb.h > 6 ? 'office' : 'none', night, seed: nb.id, tint });
+      else if (st.status === 'facility' || st.status === 'hq') {
+        const col = st.owner === 'player' ? s.company.color : s.competitors.find((c) => c.id === st.owner)?.color ?? '#94a3b8';
+        block(nb.x, nb.y, nb.w * 0.7, nb.d * 0.7, 16, '#c9d1dc', 0, { alpha, windows: 'dc', night, seed: nb.id, tint, glowBand: col });
+      } else if (st.status === 'construction' || st.status === 'demolishing') block(nb.x, nb.y, nb.w * 0.6, nb.d * 0.6, 6, '#b7791f', 0, { alpha: alpha * 0.7, tint });
+      else for (let i = 0; i < 2; i++) tree(nb.x + (hash(nb.id + i) - 0.5) * nb.w * 0.6, nb.y + (hash(nb.id + 'q' + i) - 0.5) * nb.d * 0.6, 0.9, night);
+    } else {
+      block(nb.x, nb.y, nb.w, nb.d, nb.h, nb.color, 0, { alpha, windows: nb.kind === 'house' || nb.kind === 'warehouse' ? 'none' : 'office', night, seed: nb.id, tint });
+    }
+  }
+  const depth = (x: number, y: number) => { const c = Math.cos(rot), s2 = Math.sin(rot); return (x * c - y * s2) + (x * s2 + y * c); };
+
   function draw(t: number) {
     requestAnimationFrame(draw);
     if (!visible || !parcel) return;
@@ -154,14 +203,14 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
     if (night > 0.3) for (let i = 0; i < 80; i++) { ctx.fillStyle = `rgba(220,230,255,${night * (0.3 + 0.3 * Math.sin(t / 700 + i))})`; ctx.fillRect((i * 137.5) % W, (i * 53.7) % (H * 0.4), 1.4, 1.4); }
     const st = parcelState(s, parcel.id);
     const w = parcel.rect.x1 - parcel.rect.x0, d = parcel.rect.y1 - parcel.rect.y0;
-    scale = (Math.min(W, H) / (Math.max(w, d) * 2.4)) * zoomK;
+    scale = (Math.min(W, H) / (Math.max(w, d) * 2.6 + 60)) * zoomK;
     const dim = 1 - night * 0.55;
     const tint = night * 2;
     // surrounding ground, streets and sidewalks
-    const R = Math.max(w, d) * 1.6;
+    const R = Math.max(w, d) * 1.6 + 120;
     quadAt(0, 0, R * 2.4, R * 2.4, 0, shade('#20402a', dim, tint));
     const road = shade('#1f242d', dim), walk = shade('#5d6470', dim);
-    for (const [ox, oy, vertical] of [[0, d / 2 + 16, false], [0, -d / 2 - 16, false], [w / 2 + 16, 0, true], [-w / 2 - 16, 0, true]] as [number, number, boolean][]) {
+    for (const [ox, oy, vertical] of streetsLocal) {
       if (vertical) { quadAt(ox, oy, 32, R * 2.4, 0.01, walk); quadAt(ox, oy, 22, R * 2.4, 0.02, road); }
       else { quadAt(ox, oy, R * 2.4, 32, 0.01, walk); quadAt(ox, oy, R * 2.4, 22, 0.02, road); }
       // lane dashes
@@ -192,7 +241,9 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
     if (night > 0.1) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      for (const [lx, ly] of [[-w / 2, d / 2 + 10], [w / 2, d / 2 + 10], [w / 2 + 10, -d / 2], [-w / 2 - 10, -d / 2], [0, -d / 2 - 10]]) {
+      const lampPts: number[][] = [];
+      for (const [ox, oy, v] of streetsLocal) for (let u = -R; u <= R; u += 40) lampPts.push(v ? [ox + 12, u] : [u, oy + 12]);
+      for (const [lx, ly] of lampPts) {
         const [x, y] = iso(lx, ly, 0.1);
         const g = ctx.createRadialGradient(x, y, 0, x, y, scale * 12);
         g.addColorStop(0, `rgba(255,200,130,${night * 0.45})`);
@@ -202,6 +253,9 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
       }
       ctx.restore();
     }
+    // neighbouring buildings behind the property
+    const sortedNb = neighbors.map((nb) => ({ nb, dz: depth(nb.x, nb.y) })).sort((a, b) => a.dz - b.dz);
+    for (const { nb, dz } of sortedNb) if (dz < 0) drawNeighbor(nb, s, night, tint, 1);
     // the lot
     const lotCol = st.status === 'existing' || st.status === 'facility' || st.status === 'hq' ? '#2e3540' : '#5a4a36';
     quadAt(0, 0, w, d, 0.05, shade(lotCol, dim, tint), st.owner === 'player' ? '#fbbf24' : st.owner ? '#f87171' : '#60a5fa');
@@ -331,6 +385,8 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
       for (let i = 0; i < 6; i++) tree((hash(parcel.id + i) - 0.5) * w * 0.7, (hash(parcel.id + 'y' + i) - 0.5) * d * 0.7, 1, night);
       caption = st.owner === 'player' ? 'Ready to build' : 'Empty land';
     }
+    // buildings in front of the property are ghosted so the subject stays visible
+    for (const { nb, dz } of sortedNb) if (dz >= 0) drawNeighbor(nb, s, night, tint, 0.45);
     // caption
     ctx.font = '600 15px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -351,6 +407,7 @@ export function createIsoView(container: HTMLElement, getS: () => GameState, get
     kind: 'iso',
     show(id) {
       parcel = getParcel(id) ?? null;
+      collectNeighbors();
       visible = true;
       zoomK = 1;
       container.classList.add('visible');

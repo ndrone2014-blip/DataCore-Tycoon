@@ -44,6 +44,8 @@ export interface MapEngine {
   setCountries(fc: FC): void;
   setHighlightCountry(iso: string | null): void;
   setCityData(d: CityData): void;
+  /** Static decorative city (ground, parks, skyline buildings) around every district. */
+  setCityscape(d: { ground: FC; parks: FC; buildings: FC }): void;
   setSelectedParcel(id: string | null): void;
   setHoverInfo?(cb: (hit: MapHit | null) => void): void;
   addMarker(el: HTMLElement, ll: LngLat): MarkerHandle;

@@ -96,6 +96,9 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
   map.addLayer({ id: 'countries-hl', type: 'line', source: 'countries', filter: ['==', ['get', 'iso'], '__none'], paint: { 'line-color': '#60a5fa', 'line-width': 2.2 } });
   map.addLayer({ id: 'countries-hl-fill', type: 'fill', source: 'countries', filter: ['==', ['get', 'iso'], '__none'], maxzoom: 9, paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.18 } });
 
+  for (const id of ['sky-ground', 'sky-parks', 'sky-buildings']) map.addSource(id, { type: 'geojson', data: empty() });
+  map.addLayer({ id: 'sky-ground', type: 'fill', source: 'sky-ground', minzoom: 10, paint: { 'fill-color': '#0d1626', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 12, 0.97] } });
+  map.addLayer({ id: 'sky-parks', type: 'fill', source: 'sky-parks', minzoom: 11, paint: { 'fill-color': '#14301f', 'fill-opacity': 0.95 } });
   for (const id of ['plates', 'streets', 'zones', 'parcels', 'buildings']) map.addSource(id, { type: 'geojson', data: empty() });
   map.addLayer({ id: 'plates', type: 'fill', source: 'plates', minzoom: 10, paint: { 'fill-color': '#0c1526', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 12, 0.96] } });
   map.addLayer({ id: 'plates-line', type: 'line', source: 'plates', minzoom: 10, paint: { 'line-color': '#2563eb', 'line-width': 1.5, 'line-opacity': 0.6, 'line-dasharray': [3, 2] } });
@@ -105,6 +108,13 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
   map.addLayer({ id: 'parcels-line', type: 'line', source: 'parcels', minzoom: 13, paint: { 'line-color': ['get', 'line'], 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 18, 2] } });
   map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones', minzoom: 12, paint: { 'fill-color': ['case', ['get', 'mine'], '#22c55e', ['get', 'comp'], '#ef4444', '#a78bfa'], 'fill-opacity': 0.06 } });
   map.addLayer({ id: 'zones-line', type: 'line', source: 'zones', minzoom: 12, paint: { 'line-color': ['case', ['get', 'mine'], '#4ade80', ['get', 'comp'], '#f87171', '#c4b5fd'], 'line-width': 2.2, 'line-dasharray': [2, 1.5] } });
+  map.addLayer({ id: 'sky-buildings', type: 'fill-extrusion', source: 'sky-buildings', minzoom: 12, paint: {
+    'fill-extrusion-color': ['get', 'color'],
+    'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, ['get', 'height']],
+    'fill-extrusion-base': 0,
+    'fill-extrusion-opacity': 0.88,
+    'fill-extrusion-vertical-gradient': true,
+  } });
   map.addLayer({ id: 'buildings', type: 'fill-extrusion', source: 'buildings', minzoom: 13, paint: {
     'fill-extrusion-color': ['get', 'color'],
     'fill-extrusion-height': ['get', 'height'],
@@ -190,6 +200,11 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
       setData('parcels', d.parcels);
       setData('buildings', d.buildings);
       setData('zones', d.zones);
+    },
+    setCityscape: (d) => {
+      setData('sky-ground', d.ground);
+      setData('sky-parks', d.parks);
+      setData('sky-buildings', d.buildings);
     },
     setSelectedParcel: (id) => map.setFilter('parcels-sel', ['==', ['get', 'id'], id ?? '__none']),
     setHoverInfo: (cb) => (hoverCb = cb),
