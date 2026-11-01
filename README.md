@@ -59,6 +59,7 @@ The current story mission is always shown at the bottom of the sidebar.
 
 ## Features
 
+- **Cinematic visuals** — dynamic sky with sun, stars and a day/night cycle (or lock it to day, golden hour or night); image-based reflections on glass and metal; living streets with moving traffic, headlights, street lamps, trees and sidewalks; lit windows at night; glowing facility accent bands and logo plaques; rooftop chillers with steam; aviation lights; construction scaffolding, netting and site trucks; an animated isometric title scene; glowing map markers and pulsing parcel outlines.
 - **Real interactive map** — MapLibre GL JS with OpenFreeMap / OpenStreetMap vector tiles (dark-themed at runtime), globe projection at world zoom, country boundaries from Natural Earth (world-atlas), smooth fly-to transitions, breadcrumbs, zoom/reset/back controls.
 - **Four zoom levels** — world → country → city → property. Property view is a Three.js scene with the neighborhood, the existing building, demolition (dust, excavator, debris), every construction stage (crane, steel frame, floors, transformers, rooftop chillers, cladding), and the finished facility with X-ray mode showing one rack per installed server with blinking LEDs.
 - **Property system** — ~2,000 procedurally generated parcels across 16 real cities, 10 property types, zoning codes, restrictions, development potential, demolition costs and location-driven prices. Buy individual lots or entire development zones (15% bundle discount), then consolidate zones into single campus sites.

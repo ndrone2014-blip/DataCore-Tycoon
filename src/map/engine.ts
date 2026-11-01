@@ -51,6 +51,7 @@ export interface MapEngine {
   onMove(cb: () => void): void;
   resize(): void;
   setSensitivity(v: number, invert: boolean): void;
+  setEffects?(o: { glow: boolean; timeOfDay: string }): void;
   destroy(): void;
 }
 

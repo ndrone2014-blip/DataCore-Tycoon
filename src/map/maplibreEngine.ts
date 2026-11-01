@@ -111,6 +111,24 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
     'fill-extrusion-base': ['get', 'base'],
     'fill-extrusion-opacity': 0.92,
   } });
+  map.addLayer({ id: 'parcels-glow', type: 'line', source: 'parcels', minzoom: 12, filter: ['!=', ['get', 'glow'], ''], paint: {
+    'line-color': ['get', 'glow'],
+    'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 16],
+    'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 2, 18, 12],
+    'line-opacity': 0.55,
+  } }, 'buildings');
+  try {
+    map.setSky({ 'sky-color': '#0b1a3a', 'horizon-color': '#1f3f80', 'fog-color': '#08122a', 'sky-horizon-blend': 0.7, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.5, 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 8, 1, 11, 0] });
+  } catch { /* sky needs MapLibre v5 */ }
+  try {
+    map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: 0.32, position: [1.4, 210, 35] });
+  } catch { /* ignore */ }
+  let glowOn = true;
+  const pulse = setInterval(() => {
+    if (!map.getLayer('parcels-glow')) return;
+    const v = glowOn ? 0.4 + 0.3 * Math.sin(performance.now() / 500) : 0;
+    try { map.setPaintProperty('parcels-glow', 'line-opacity', v); } catch { /* ignore */ }
+  }, 120);
   map.addLayer({ id: 'parcels-hover', type: 'line', source: 'parcels', filter: ['==', ['get', 'id'], '__none'], paint: { 'line-color': '#93c5fd', 'line-width': 2.5 } });
   map.addLayer({ id: 'parcels-sel', type: 'line', source: 'parcels', filter: ['==', ['get', 'id'], '__none'], paint: { 'line-color': '#fbbf24', 'line-width': 3.5 } });
 
@@ -193,6 +211,16 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
         map.scrollZoom.setZoomRate((1 / 100) * v);
       } catch { /* ignore */ }
     },
-    destroy: () => map.remove(),
+    setEffects: (o) => {
+      glowOn = o.glow;
+      try {
+        const night = o.timeOfDay === 'night' ? 0.18 : o.timeOfDay === 'sunset' ? 0.26 : 0.34;
+        map.setLight({ anchor: 'viewport', color: o.timeOfDay === 'sunset' ? '#ffd2a1' : o.timeOfDay === 'night' ? '#9fb4ff' : '#ffffff', intensity: night, position: [1.4, 210, 35] });
+      } catch { /* ignore */ }
+    },
+    destroy: () => {
+      clearInterval(pulse);
+      map.remove();
+    },
   };
 }

@@ -477,3 +477,79 @@ label.check { display: flex; align-items: center; gap: 8px; font-size: 13px; col
   .speedups { grid-template-columns: repeat(2, 1fr); }
   .tbl { font-size: 11px; }
 }
+
+/* =====================================================================
+   VISUAL UPGRADE PASS — glass panels, glow accents, animated details
+   ===================================================================== */
+:root { --glass: linear-gradient(180deg, rgba(22, 36, 62, 0.92), rgba(11, 20, 37, 0.94)); --edge: rgba(120, 160, 230, 0.14); --glow-blue: 0 0 24px rgba(59, 130, 246, 0.35); }
+body { background: radial-gradient(1200px 600px at 70% -10%, #10264a 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, #0d1f3d 0%, transparent 55%), var(--bg); }
+.page::before { content: ''; position: fixed; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(59,130,246,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.035) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at 50% 0%, black 0%, transparent 75%); z-index: 0; }
+.page > * { position: relative; z-index: 1; }
+.card, .stat { background: var(--glass); border: 1px solid var(--edge); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 30px rgba(0, 0, 0, 0.28); transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
+.card:hover { border-color: rgba(120, 160, 230, 0.24); }
+.stat { position: relative; overflow: hidden; }
+.stat::before { content: ''; position: absolute; top: -40px; right: -40px; width: 120px; height: 120px; border-radius: 50%; background: radial-gradient(circle, rgba(59, 130, 246, 0.18), transparent 70%); }
+.stat.accent::before { background: radial-gradient(circle, rgba(34, 197, 94, 0.22), transparent 70%); }
+.stat b { background: linear-gradient(180deg, #ffffff, #b9c8e2); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stat b .pos, .stat b .neg { -webkit-text-fill-color: currentColor; }
+.stat.accent b { background: linear-gradient(180deg, #86efac, #22c55e); -webkit-background-clip: text; background-clip: text; }
+.topbar { background: linear-gradient(180deg, rgba(10, 18, 34, 0.96), rgba(7, 13, 25, 0.92)); box-shadow: 0 1px 0 rgba(96, 165, 250, 0.12), 0 8px 30px rgba(0, 0, 0, 0.35); }
+.topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, rgba(96, 165, 250, 0.55), rgba(168, 85, 247, 0.45), transparent); }
+.topbar { position: relative; }
+.tb-stat.cash b { text-shadow: 0 0 18px rgba(74, 222, 128, 0.35); }
+.tb-logo { box-shadow: 0 0 18px color-mix(in srgb, var(--c, #3b82f6) 45%, transparent); }
+.xpbar i { box-shadow: 0 0 10px rgba(168, 85, 247, 0.7); }
+.sidebar { background: linear-gradient(180deg, #08111f, #060c18); box-shadow: 1px 0 0 rgba(96, 165, 250, 0.06); }
+.brand-logo { text-shadow: 0 0 16px rgba(96, 165, 250, 0.8); }
+.nav-item.active { box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18), 0 0 20px rgba(59, 130, 246, 0.12); }
+.nav-item.active .nav-ic { color: #93c5fd; filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.8)); }
+.btn { position: relative; overflow: hidden; }
+.btn::after { content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%; background: linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.18), transparent); transition: left 0.5s; }
+.btn:hover:not([disabled])::after { left: 140%; }
+.btn.primary { background: linear-gradient(180deg, #4f8ff7, #2563eb 55%, #1d4ed8); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+.btn.danger { box-shadow: 0 6px 18px rgba(220, 38, 38, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.btn.warn { box-shadow: 0 6px 18px rgba(245, 158, 11, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.bar { background: rgba(22, 35, 59, 0.9); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4); }
+.bar i { box-shadow: 0 0 12px rgba(96, 165, 250, 0.45); position: relative; overflow: hidden; }
+.bar i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent); transform: translateX(-100%); animation: barshine 2.4s infinite; }
+@keyframes barshine { to { transform: translateX(100%); } }
+.bar.big i { background: linear-gradient(90deg, #2563eb, #06b6d4, #2563eb); background-size: 200% 100%; animation: flow 3s linear infinite; }
+@keyframes flow { to { background-position: -200% 0; } }
+.tag.ok { box-shadow: 0 0 10px rgba(34, 197, 94, 0.15); }
+.dc-card:hover, .eq-card:hover, .offer:hover, .cand:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), var(--glow-blue); border-color: rgba(96, 165, 250, 0.45); }
+.tech.available { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25) inset, 0 0 22px rgba(59, 130, 246, 0.18); }
+.tech.active { box-shadow: 0 0 24px rgba(245, 158, 11, 0.25); }
+.tech.done { box-shadow: 0 0 18px rgba(34, 197, 94, 0.12); }
+.ach.done { box-shadow: 0 0 24px rgba(234, 179, 8, 0.15); }
+.ach.done .ach-icon { filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.6)); }
+.mission-banner { position: relative; overflow: hidden; }
+.mission-banner::after { content: ''; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, rgba(96, 165, 250, 0.08) 50%, transparent 70%); background-size: 250% 100%; animation: sweep 5s linear infinite; pointer-events: none; }
+@keyframes sweep { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.modal { background: linear-gradient(180deg, rgba(16, 28, 50, 0.98), rgba(9, 17, 32, 0.98)); box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(96, 165, 250, 0.12), var(--glow-blue); }
+.toast { backdrop-filter: blur(10px); background: rgba(12, 22, 41, 0.9); }
+.toast.level { box-shadow: 0 0 30px rgba(168, 85, 247, 0.35); }
+.toast.achievement { box-shadow: 0 0 30px rgba(234, 179, 8, 0.3); }
+.page-head h1 { background: linear-gradient(90deg, #ffffff, #a5c4f5); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 1.75rem; letter-spacing: -0.02em; }
+.crumbs, .map-legend, .map-tools .icon-btn { background: rgba(8, 15, 29, 0.78); backdrop-filter: blur(10px); border-color: rgba(120, 160, 230, 0.2); }
+.map-panel { background: linear-gradient(180deg, rgba(10, 19, 36, 0.97), rgba(7, 13, 25, 0.98)); box-shadow: -10px 0 40px rgba(0, 0, 0, 0.35); }
+.buy-box { box-shadow: 0 0 30px rgba(37, 99, 235, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+
+/* map markers: glowing beacons */
+.city-marker .cm-pin { width: 16px; height: 16px; border-radius: 50%; transform: none; border: 2px solid rgba(255, 255, 255, 0.85); background: radial-gradient(circle at 35% 30%, #93c5fd, #1d4ed8); font-size: 0; position: relative; }
+.city-marker .cm-pin::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid rgba(96, 165, 250, 0.6); animation: ping 2.2s ease-out infinite; }
+@keyframes ping { from { transform: scale(0.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+.city-marker.mine .cm-pin { width: 24px; height: 24px; font-size: 11px; background: radial-gradient(circle at 35% 30%, #86efac, #15803d); color: #fff; display: grid; place-items: center; }
+.city-marker.mine .cm-pin::after { border-color: rgba(74, 222, 128, 0.7); }
+.city-marker.locked .cm-pin { width: 11px; height: 11px; background: radial-gradient(circle at 35% 30%, #94a3b8, #334155); border-color: rgba(148, 163, 184, 0.7); filter: none; }
+.city-marker.locked .cm-pin::after { display: none; }
+.city-marker:hover .cm-pin { transform: scale(1.25); }
+.city-marker .cm-label { background: rgba(6, 12, 24, 0.86); backdrop-filter: blur(6px); border-color: rgba(120, 160, 230, 0.25); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); }
+.city-marker .cm-label b { font-size: 11px; letter-spacing: 0.02em; }
+.no-glow .city-marker .cm-pin::after, .no-glow .bar i::after, .no-glow .mission-banner::after { display: none; }
+.no-glow .btn::after { display: none; }
+
+/* title scene */
+#title-scene { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.boot-card { background: rgba(8, 15, 30, 0.72); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(96, 165, 250, 0.15), 0 0 60px rgba(59, 130, 246, 0.15); z-index: 1; }
+.boot-card h1 { text-shadow: 0 0 30px rgba(96, 165, 250, 0.35); }
+.boot-card h1 span { background: linear-gradient(90deg, #60a5fa, #a78bfa, #22d3ee); -webkit-background-clip: text; background-clip: text; color: transparent; }

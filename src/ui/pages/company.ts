@@ -139,6 +139,8 @@ export function renderSettings(app: App): string {
       <div class="set-row"><span>Company color</span><div class="color-pick">${COMPANY_COLORS.map((c) => `<button class="${s.company.color === c ? 'on' : ''}" style="background:${c}" data-act="coColor" data-v="${c}"></button>`).join('')}</div></div>
       <h3 class="mt">🎨 Graphics & performance</h3>
       <label class="set-row"><span>Graphics quality</span><select data-change="setting" data-k="graphics">${['low', 'medium', 'high'].map((g) => `<option value="${g}" ${st.graphics === g ? 'selected' : ''}>${g[0].toUpperCase() + g.slice(1)}</option>`).join('')}</select></label>
+      <label class="set-row"><span>Time of day<small>Lighting for the 3D view & map</small></span><select data-change="setting" data-k="timeOfDay">${[['auto', 'Cinematic cycle'], ['day', 'Day'], ['sunset', 'Golden hour'], ['night', 'Night']].map(([v, l]) => `<option value="${v}" ${st.timeOfDay === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${check('bloom', 'Glow effects', st.bloom, 'Neon accents, light halos, pulsing markers')}
       ${range('uiScale', 'UI scale', 0.8, 1.3, 0.05, st.uiScale, (x) => Math.round(x * 100) + '%')}
       ${check('reduceMotion', 'Reduce motion', st.reduceMotion, 'Fewer camera animations')}
       ${check('forceFallbackMap', 'Use offline map', st.forceFallbackMap, 'Skips MapLibre / online tiles (reload required)')}

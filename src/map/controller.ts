@@ -268,7 +268,7 @@ export class MapController {
           fill = mix(PROPERTY_TYPE_INFO[p.type].color, bg, unlocked ? 0.62 : 0.82);
           line = unlocked ? '#3b4f6e' : '#1f2a3d';
         }
-        parcels.push({ type: 'Feature', properties: { id: p.id, fill, line, status: st.status, owner: st.owner ?? '' }, geometry: { type: 'Polygon', coordinates: [p.poly] } });
+        parcels.push({ type: 'Feature', properties: { id: p.id, fill, line, status: st.status, owner: st.owner ?? '', mine: st.owner === 'player', ptype: p.type, glow: st.owner === 'player' ? me : st.owner ? line : '' }, geometry: { type: 'Polygon', coordinates: [p.poly] } });
         // building extrusions
         const foot = p.footprintPoly;
         let height = 0, base = 0, color = '#64748b', poly = foot;
@@ -308,7 +308,7 @@ export class MapController {
             }
           }
         }
-        if (height > 0) buildings.push({ type: 'Feature', properties: { id: p.id, height, base, color }, geometry: { type: 'Polygon', coordinates: [poly] } });
+        if (height > 0) buildings.push({ type: 'Feature', properties: { id: p.id, height, base, color, kind: st.status === 'existing' ? (['office', 'premium'].includes(p.type) ? 'office' : 'existing') : st.status, mine: st.owner === 'player', ptype: p.type }, geometry: { type: 'Polygon', coordinates: [poly] } });
       }
       for (const z of lay.zones) {
         const owners = new Set(z.parcelIds.map((pid) => parcelState(s, pid).owner));

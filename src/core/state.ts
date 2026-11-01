@@ -189,6 +189,8 @@ export interface Settings {
   showFps: boolean;
   autosaveSeconds: number;
   mapLabels: boolean;
+  timeOfDay: 'auto' | 'day' | 'sunset' | 'night';
+  bloom: boolean;
 }
 
 export interface LogEntry {
@@ -271,6 +273,8 @@ export function defaultSettings(): Settings {
     showFps: false,
     autosaveSeconds: 15,
     mapLabels: true,
+    timeOfDay: 'auto',
+    bloom: true,
   };
 }
 

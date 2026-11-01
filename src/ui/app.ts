@@ -20,6 +20,7 @@ import { renderMapPanel } from './pages/mapPanel';
 import { currentStory, missionProgress } from '../systems/progression';
 import { countryById, cityById } from '../config/world';
 import { getParcel } from '../world/parcels';
+import { stopTitleScene } from './titleScene';
 
 export type Result = { ok: boolean; reason?: string } | void | undefined | boolean;
 
@@ -48,6 +49,7 @@ export class App {
     this.s = state;
     this.d = deriveAll(state);
     document.getElementById('boot')?.remove();
+    stopTitleScene();
     const root = document.getElementById('app')!;
     root.innerHTML = this.shellHtml();
     this.applySettings();
@@ -283,6 +285,7 @@ export class App {
     (window as any).__map = this.map;
     try {
       await this.map.init(this.s.settings.forceFallbackMap);
+      this.applySettings();
     } catch (err) {
       console.error('Map init failed', err);
     }
@@ -421,6 +424,8 @@ export class App {
     document.documentElement.style.setProperty('--accent-co', this.s.company.color);
     setAudioSettings(st.sfxVolume, st.musicVolume, st.muted);
     this.map?.engine?.setSensitivity(st.cameraSensitivity, st.invertZoom);
+    this.map?.engine?.setEffects?.({ glow: st.bloom !== false, timeOfDay: st.timeOfDay ?? 'auto' });
+    document.documentElement.classList.toggle('no-glow', st.bloom === false);
     this.pv?.resize();
   }
 

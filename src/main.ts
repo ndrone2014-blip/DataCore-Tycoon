@@ -9,6 +9,7 @@ import { ECONOMY } from './config/economy';
 import { COMPANY_COLORS, COMPANY_LOGOS } from './config/content';
 import { esc, money, duration } from './core/format';
 import { unlockAudio, playSfx } from './audio/sound';
+import { startTitleScene, stopTitleScene } from './ui/titleScene';
 
 const app = new App();
 (window as any).__app = app;
@@ -22,7 +23,7 @@ function bootRoot(): HTMLElement {
 
 function titleScreen(hasSave: { name: string; level: number; savedAt: number } | null, repaired: string[] = [], error?: string) {
   bootRoot().innerHTML = `
-    <div class="boot-bg"><div class="grid-floor"></div><div class="glow"></div></div>
+    <canvas id="title-scene"></canvas>
     <div class="boot-card">
       <div class="boot-logo">◢◤</div>
       <h1>AI DATA CENTER <span>EMPIRE</span></h1>
@@ -36,12 +37,13 @@ function titleScreen(hasSave: { name: string; level: number; savedAt: number } |
       </div>
       <p class="boot-foot">Single-player · Autosaves locally · Developed by Drone Hive Studios | Developer @ndrone40</p>
     </div>`;
+  startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
 }
 
 function wizardScreen() {
   const starters = CITIES.filter((c) => c.unlockLevel <= 1 && c.license === 0);
   bootRoot().innerHTML = `
-    <div class="boot-bg"><div class="grid-floor"></div><div class="glow"></div></div>
+    <canvas id="title-scene"></canvas>
     <div class="boot-card wide">
       <h2>Found your company</h2>
       <div class="wizard">
@@ -54,6 +56,7 @@ function wizardScreen() {
       <div class="preview" style="--c:${wizard.color}"><span class="tb-logo">${esc(wizard.logo)}</span><b>${esc(wizard.name || 'Your Company')}</b><small>Headquartered in ${CITIES.find((c) => c.id === wizard.city)!.name}</small></div>
       <div class="row between mt"><button class="btn ghost" data-act="bootBack">Back</button><button class="btn primary xl" data-act="bootStart">Launch company →</button></div>
     </div>`;
+  startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
 }
 
 let cachedMeta: { name: string; level: number; savedAt: number } | null = null;
