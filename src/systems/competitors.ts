@@ -15,7 +15,7 @@ import { rand, randRange, pick } from '../core/rng';
 import { emit, toast } from '../core/bus';
 import { money } from '../core/format';
 
-const cuPerSlot = (tech: number) => 40 * Math.pow(1.55, tech);
+const cuPerSlot = (tech: number) => 40 * Math.pow(1.35, tech);
 const costPerCu = (tech: number) => 430 / (1 + tech * 0.08);
 
 export function createCompetitors(s: GameState): Competitor[] {
@@ -48,11 +48,11 @@ function claim(s: GameState, c: Competitor, parcelId: string, status: 'demolishi
   s.parcels[parcelId] = { ...(s.parcels[parcelId] ?? parcelState(s, parcelId)), owner: c.id, status };
 }
 
-function choosePlot(s: GameState, c: Competitor, city: CityDef, minArea: number, maxArea: number): ParcelDef | undefined {
+function choosePlot(s: GameState, c: Competitor, city: CityDef, minArea: number, maxArea: number, budget = Infinity): ParcelDef | undefined {
   const lay = getCityLayout(city.id);
   const free = lay.parcels.filter((p) => {
     const st = s.parcels[p.id];
-    return (!st || !st.owner) && p.area >= minArea && p.area <= maxArea && p.type !== 'premium';
+    return (!st || !st.owner) && p.area >= minArea && p.area <= maxArea && p.type !== 'premium' && landValue(s, p.id) <= budget;
   });
   if (!free.length) return undefined;
   // frugal companies prefer cheap land per m^2, others prefer bigger lots
@@ -84,6 +84,7 @@ function think(s: GameState, c: Competitor, der: Derived) {
   // 1) fill existing sites with capacity
   for (const site of c.sites) {
     if (site.stage !== 'operational' || site.cu >= site.maxCu) continue;
+    if ((der.cityPrice[site.cityId] ?? 1) < 0.55) continue; // don't flood a saturated market
     const budget = c.cash * 0.35 * c.aggression;
     const add = Math.min(site.maxCu - site.cu, budget / costPerCu(c.techLevel));
     if (add > 5) {
@@ -108,14 +109,16 @@ function think(s: GameState, c: Competitor, der: Derived) {
   }
   // 3) expansion
   const building = c.sites.filter((x) => x.stage !== 'operational').length;
-  const threshold = 1_200_000 / c.aggression;
-  if (building < 1 + Math.floor(c.aggression) && c.cash > threshold && rand() < 0.55 * c.aggression) {
+  const threshold = 900_000 / c.aggression;
+  const siteCap = 3 + (s.gameHours / 1200) * c.aggression;
+  if (building < 1 + Math.floor(c.aggression) && c.sites.length < siteCap && c.cash > threshold && rand() < 0.35 * c.aggression) {
     const cities = allowedCities(s, c);
     // score cities: demand/supply ratio (profit-focus), cheap land (frugality), home bias
     let bestCity: CityDef | undefined;
     let bestScore = -Infinity;
     for (const city of cities) {
       const ratio = der.cityDemand[city.id] / Math.max(500, der.citySupply[city.id]);
+      if (ratio < 1.15) continue; // market saturated — no new builds here
       const score = ratio * c.profitFocus - city.landMult * 0.3 * c.frugality + rand() * 0.8 + (c.sites.some((x) => x.cityId === city.id) ? 0.2 : 0);
       if (score > bestScore) { bestScore = score; bestCity = city; }
     }
@@ -139,7 +142,7 @@ function think(s: GameState, c: Competitor, der: Derived) {
         }
       }
       const maxArea = c.cash > 30_000_000 ? 60000 : c.cash > 8_000_000 ? 20000 : 6000;
-      const p = choosePlot(s, c, bestCity, 1100, maxArea);
+      const p = choosePlot(s, c, bestCity, 1100, maxArea, c.cash * 0.4);
       if (p) {
         const price = landValue(s, p.id);
         if (price < c.cash * 0.45) {
@@ -201,11 +204,11 @@ export function tickCompetitors(s: GameState, dt: number, realDt: number, der: D
     let cu = 0;
     for (const site of c.sites) {
       if (site.stage !== 'operational') continue;
-      const util = 0.72 + 0.12 * Math.min(1, c.profitFocus / 1.6);
+      const util = 0.62 + 0.12 * Math.min(1, c.profitFocus / 1.6);
       rev += site.cu * util * (der.cityPrice[site.cityId] ?? 1) * (1 + c.techLevel * 0.04);
       cu += site.cu;
     }
-    const exp = cu * 0.34 * (1 - (c.frugality - 1) * 0.12) + c.sites.length * 40;
+    const exp = (cu * 0.07 * (1 - (c.frugality - 1) * 0.15)) / (1 + c.techLevel * 0.12) + c.sites.length * 60;
     c.revenueHr = rev;
     c.expenseHr = exp;
     c.cash += (rev - exp) * dt;

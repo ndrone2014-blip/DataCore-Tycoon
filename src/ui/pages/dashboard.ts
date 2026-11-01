@@ -24,6 +24,7 @@ export function renderDashboard(app: App): string {
   const sp = story ? missionProgress(s, d, { ...story, base: 0 }) : 0;
   const warnings = Object.values(s.facilities).filter((f) => d.fac[f.id]?.warnings.length);
   return `
+  ${s.cash < 0 ? `<div class="callout bad">⚠️ <b>Your cash is negative.</b> Expenses keep running — take a bank loan on the Finances page, sell idle property, or cut staff before things get worse.</div>` : ''}
   ${story ? `<div class="card mission-banner ${sp >= 1 ? 'ready' : ''}">
     <div><small>Current mission</small><h3>${esc(story.title)}</h3><p>${esc(story.desc)}</p></div>
     <div class="mb-right"><div class="bar"><i style="width:${(sp * 100).toFixed(0)}%"></i></div>
@@ -46,7 +47,7 @@ export function renderDashboard(app: App): string {
         type: 'line', money: true, height: 230,
         labels: hourly.map((h) => gameDate(Date.UTC(2027, 0, 1, 8), h.t).split('·')[1] ?? ''),
         datasets: [
-          { label: 'Revenue', data: hourly.map((h) => sumRec(h.revenue)), color: '#22c55e', fill: true },
+          { label: 'Operating revenue', data: hourly.map((h) => (h.revenue.Contracts ?? 0) + (h.revenue['Spot Market'] ?? 0)), color: '#22c55e', fill: true },
           { label: 'Expenses', data: hourly.map((h) => sumRec(h.expenses)), color: '#ef4444' },
         ],
       }) : empty('📈', 'No data yet', 'Charts appear after the first game hour.')}
