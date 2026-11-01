@@ -55,6 +55,7 @@ export function renderDashboard(app: App): string {
     <div class="card">
       <h3>Compute capacity</h3>
       ${(['cpu', 'gpu', 'storage'] as const).map((c) => `<div class="cap-line"><span style="color:${CAP_LABEL[c].color}">●</span> ${CAP_LABEL[c].name}<b>${num(t.delivered[c])} ${CAP_LABEL[c].unit}</b></div>`).join('')}
+      ${s.buffs?.length ? `<h3 class="mt">Active boosts</h3>${s.buffs.map((b) => `<div class="event ${b.value >= 0 ? 'good' : 'bad'}"><b>${b.value >= 0 ? '✨' : '⏳'} ${esc(b.label)}</b><small>${gameDuration(b.endsAt - s.gameHours)} left</small></div>`).join('')}` : ''}
       <h3 class="mt">World events</h3>
       ${s.events.length ? s.events.map((e) => {
         const tx = eventText(e.defId, e.cityId);

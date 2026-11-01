@@ -139,7 +139,7 @@ export function renderContracts(app: App): string {
     ${stat('Spot market revenue/h', money(Object.values(d.fac).reduce((a, f) => a + f.revenue.spot, 0)))}
     ${stat('Reputation', `${Math.round(s.company.reputation)}/100`, 'Affects contract rates')}
   </div>
-  <div class="card mt">${tabs}${body}</div>`;
+  <div class="card mt"><div class="row between wrap gap">${tabs}<label class="check auto-toggle"><input type="checkbox" data-change="setting" data-k="autoContracts" ${s.settings.autoContracts ? 'checked' : ''}> <b>Auto-sign contracts</b> <span class="muted">— accept every offer that fits a facility</span></label></div>${body}</div>`;
 }
 
 export function businessActions(app: App) {

@@ -219,6 +219,7 @@ export function checkAchievements(s: GameState, d: Derived) {
       log(s, `Achievement unlocked: ${a.title}`, 'good');
       toast({ title: `Achievement: ${a.title}`, body: `${a.desc}${a.reward.cash ? ' +' + money(a.reward.cash) : ''}${a.reward.permLabel ? ' · ' + a.reward.permLabel : ''}`, kind: 'achievement', icon: a.icon });
       sfx('achievement');
+      emit('achievement', a.id);
     }
   }
 }

@@ -2,7 +2,9 @@
 
 import type { GameState } from '../core/state';
 import { deriveAll, type Derived } from '../systems/derive';
-import { advance, catchUp, type OfflineReport } from '../systems/sim';
+import { advance, advanceFrozen, catchUp, type OfflineReport } from '../systems/sim';
+import { confetti, moneyPop } from './fx';
+import { DECISIONS, resolveDecision } from '../systems/decisions';
 import { saveGame, saveSync } from '../save/save';
 import { on, emit } from '../core/bus';
 import { morph, registerActions, registerChanges } from './dom';
@@ -44,6 +46,8 @@ export class App {
   private fpsT = performance.now();
   private loopTimer = 0;
   private bootTime = Date.now();
+  private lastPop = 0;
+  private popCash = 0;
 
   start(state: GameState, offline: OfflineReport | null) {
     this.s = state;
@@ -62,6 +66,10 @@ export class App {
       this.pv?.update();
     });
     on('mapstate', () => this.onMapState());
+    on('levelup', () => { if (this.s.settings.celebrations !== false) confetti(1.3); });
+    on('facilityBuilt', () => { if (this.s.settings.celebrations !== false) confetti(0.7); });
+    on('achievement', () => { if (this.s.settings.celebrations !== false) confetti(0.6, ['#facc15', '#fde68a', '#f59e0b', '#ffffff']); });
+    on('decision', () => this.render());
     on('maphover', (t: string) => {
       const el = document.getElementById('map-hover');
       if (el) {
@@ -103,14 +111,21 @@ export class App {
       dt = 0;
     }
     this.s.lastRealTime = Date.now();
-    if (!this.s.paused && dt > 0) {
-      try {
-        this.d = advance(this.s, dt * this.s.speed);
-      } catch (err) {
-        console.error('Simulation error', err);
+    try {
+      if (!this.s.paused && dt > 0) this.d = advance(this.s, dt * this.s.speed);
+      else if (dt > 0) this.d = advanceFrozen(this.s, dt * this.s.speed);
+      else this.d = deriveAll(this.s);
+    } catch (err) {
+      console.error('Simulation error', err);
+    }
+    // floating income pops
+    if (now - this.lastPop > 2500) {
+      const delta = this.s.cash - this.popCash;
+      if (!this.s.paused && this.popCash !== 0 && Math.abs(delta) >= 1 && this.s.settings.celebrations !== false && Math.abs(delta) < Math.max(1e6, Math.abs(this.d.totals.revenueHr) * 50)) {
+        moneyPop(document.querySelector('.tb-stat.cash'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))}`, delta >= 0);
       }
-    } else {
-      this.d = deriveAll(this.s);
+      this.popCash = this.s.cash;
+      this.lastPop = now;
     }
     if (now - this.lastRender > 450) {
       this.lastRender = now;
@@ -154,6 +169,8 @@ export class App {
           <aside class="map-panel" id="map-panel"></aside>
         </section>
         <section id="page" class="page"></section>
+        <div id="time-banner" class="time-banner"></div>
+        <div id="decision-root" class="decision-root"></div>
       </main>
     </div>
     <div id="toasts" class="toasts"></div>
@@ -181,6 +198,10 @@ export class App {
         morph(el, `<div class="page-head"><h1>${p.title}</h1>${p.subtitle ? `<p>${p.subtitle(this)}</p>` : ''}</div>${p.render(this)}`);
       }
     }
+    morph(document.getElementById('time-banner')!, s.paused ? `<div class="tb-inner"><span class="tb-ico">⏸</span><div><b>Time is stopped</b><small>No income, expenses, rivals or events. Construction &amp; research keep going — buy, build and upgrade freely.</small></div><button class="btn primary sm" data-act="pause">▶ Resume</button></div>` : '');
+    document.getElementById('time-banner')!.classList.toggle('show', s.paused);
+    document.documentElement.classList.toggle('paused-world', s.paused);
+    morph(document.getElementById('decision-root')!, this.decisionHtml());
     if (isModalOpen()) refreshModal();
     void updateCharts();
     void force;
@@ -208,7 +229,7 @@ export class App {
       <div class="tb-time">
         <div class="tb-date">${gameDate(Date.UTC(2027, 0, 1, 8), s.gameHours)}</div>
         <div class="speed">
-          <button class="icon-btn ${s.paused ? 'on' : ''}" data-act="pause" title="Pause (Space)">${s.paused ? icon('play') : icon('pause')}</button>
+          <button class="stop-btn ${s.paused ? 'on' : ''}" data-act="pause" title="Stop / resume time (Space). While stopped you can still buy, build and upgrade.">${s.paused ? '▶ Resume' : '⏸ Stop time'}</button>
           ${[1, 2, 4].map((v) => `<button class="sp ${!s.paused && s.speed === v ? 'on' : ''}" data-act="speed" data-v="${v}" title="${v}x speed">${v}×</button>`).join('')}
           <button class="icon-btn" data-act="saveNow" title="Save now (Ctrl+S)">${icon('save')}</button>
           <button class="icon-btn" data-act="toggleMute" title="Mute">${s.settings.muted ? icon('mute') : icon('sound')}</button>
@@ -237,6 +258,21 @@ export class App {
       <small>Mission ${this.s.missions.tutorial + 1}</small><b>${esc(st.title)}</b>
       <div class="bar sm"><i style="width:${(p * 100).toFixed(0)}%"></i></div>
       ${p >= 1 ? '<em>Claim reward →</em>' : `<p>${esc(st.desc)}</p>`}</div>`;
+  }
+
+  private decisionHtml(): string {
+    const pd = this.s.decision;
+    if (!pd) return '';
+    const def = DECISIONS.find((x) => x.id === pd.defId);
+    if (!def) return '';
+    const choices = def.choices(this.s, pd.data);
+    const left = Math.max(0, pd.expiresAt - this.s.gameHours);
+    return `<div class="decision-card" data-key="dec-${pd.id}">
+      <div class="dc-head"><span class="dc-ico">${def.icon}</span><div><small>Opportunity · expires in ${Math.ceil(left / 24)}d</small><b>${esc(def.title)}</b></div>
+      <button class="dc-x" data-act="decisionDismiss" title="Ignore">✕</button></div>
+      <p>${esc(def.text(this.s, pd.data))}</p>
+      <div class="dc-choices">${choices.map((c, i) => `<button class="btn ${i === 0 ? 'primary' : 'ghost'} sm" data-act="decisionChoose" data-i="${i}" ${c.cost && this.s.cash < c.cost ? `disabled title="Need ${money(c.cost)}"` : ''}>${esc(c.label)}<small>${esc(c.hint)}</small></button>`).join('')}</div>
+    </div>`;
   }
 
   claimableMissions(): number {
@@ -410,6 +446,8 @@ export class App {
         this.render();
       },
       openParcel: (el) => this.openParcel(el.dataset.id!),
+      decisionChoose: (el) => this.run(() => resolveDecision(this.s, Number(el.dataset.i))),
+      decisionDismiss: () => { this.s.decision = undefined; this.render(); },
       openCity: (el) => this.openCity(el.dataset.id!),
     });
     for (const p of PAGES) if (p.actions) registerActions(p.actions(this));

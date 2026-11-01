@@ -70,3 +70,51 @@ assert(rep && rep.seconds > 3000, 'offline progress');
 const bad = parse('{"magic":"AIDCE","state":{"company":{"name":"x"},"cash":"NaN"}}');
 assert(bad.state && bad.state.cash === 0 && bad.repaired.length > 0, 'repair invalid save');
 assert(!parse('garbage').state, 'reject garbage');
+
+// ---- Stop Time, auto-equip, opportunity cards, safety nets ----
+import { advanceFrozen } from '../src/systems/sim';
+import { autoEquip } from '../src/systems/equipment';
+import { DECISIONS, resolveDecision } from '../src/systems/decisions';
+{
+  const g = newGame({ name: 'Calm', logo: '⬡', color: '#22c55e', startCity: 'dallas', difficulty: 'relaxed' });
+  const sp = g.company.startParcel!;
+  startDemolition(g, sp);
+  const cash0 = g.cash, gh0 = g.gameHours;
+  g.paused = true;
+  for (let i = 0; i < 120; i++) advanceFrozen(g, 1);
+  assert(g.parcels[sp].status === 'cleared', 'demolition advances while time is stopped');
+  assert(g.cash === cash0 && g.gameHours === gh0, 'no money or game time passes while stopped');
+  startBuild(g, sp, 'modular', undefined);
+  for (let i = 0; i < 200 && Object.keys(g.projects).length; i++) advanceFrozen(g, 1);
+  const fid2 = Object.keys(g.facilities)[0];
+  assert(!!fid2, 'construction completes while stopped');
+  const r = autoEquip(g, fid2, g.cash * 0.8);
+  const st2 = deriveAll(g).fac[fid2];
+  console.log('autoEquip', r.count, money(r.spent), JSON.stringify(g.facilities[fid2].equipment), 'perf', st2.perf.toFixed(2));
+  assert(r.ok && r.count > 3, 'auto-equip installs equipment');
+  assert(st2.powerFactor >= 0.999 && st2.coolingFactor >= 0.999, 'auto-equip never overloads power or cooling');
+  g.paused = false;
+  for (let i = 0; i < 60; i++) step(g, 1);
+  // every opportunity card applies cleanly
+  let applied = 0;
+  for (const def of DECISIONS) {
+    const data = def.setup(g, deriveAll(g));
+    if (!data) continue;
+    g.cash = 1e8;
+    g.decision = { id: 'x', defId: def.id, expiresAt: g.gameHours + 50, data };
+    const res = resolveDecision(g, 0);
+    if (res.ok) applied++; else console.log('decision fail', def.id, res.reason);
+  }
+  console.log('decisions applied', applied, 'buffs', g.buffs?.length);
+  assert(applied >= 6, 'opportunity cards resolve');
+  // overdraft protection
+  g.cash = -50_000;
+  step(g, 1);
+  assert(g.cash >= 0 && g.debt > 0, 'overdraft protection kicks in');
+  // offline loss cap
+  g.debt = 0; g.cash = 1_000_000; g.employees = Array.from({ length: 40 }, (_, i) => ({ ...g.candidates[0], id: 'e' + i, salary: 5000 }));
+  g.lastRealTime = Date.now() - 3 * 3600_000;
+  g.settings.autoLoan = false;
+  catchUp(g);
+  assert(g.cash >= 749_999, 'offline losses capped at 25%');
+}

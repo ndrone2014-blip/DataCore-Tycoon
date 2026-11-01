@@ -146,6 +146,13 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
     const speed = 1 + eff(der.effects, 'offerRate') + deptBonus(s, 'sales');
     c.nextOfferAt = s.gameHours + randRange(ECONOMY.offerIntervalHours[0], ECONOMY.offerIntervalHours[1]) / speed;
   }
+  // auto-sign: hand offers straight to the facility with the most room
+  if (s.settings.autoContracts && c.offers.length) {
+    for (const o of [...c.offers]) {
+      const best = eligibleFacilities(s, o, der).filter((x) => x.ok).sort((a, b) => b.st.free[o.cap] - a.st.free[o.cap])[0];
+      if (best) acceptOffer(s, o.id, best.f.id);
+    }
+  }
   for (let i = c.offers.length - 1; i >= 0; i--) {
     const o = c.offers[i];
     if (o.expiresAt !== undefined && s.gameHours >= o.expiresAt) {
@@ -171,18 +178,22 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
     ct.hoursLeft -= dt;
     if (ct.fulfillment + 1e-6 < ct.sla) ct.breachHours += dt;
     else ct.breachHours = Math.max(0, ct.breachHours - dt * 0.5);
-    if (ct.breachHours > 36) {
+    if (ct.breachHours > ECONOMY.slaGraceHours * 0.5 && !(ct as any).warned) {
+      (ct as any).warned = true;
+      toast({ title: 'Customer unhappy', body: `${ct.customer} is getting poor service (${Math.round(ct.fulfillment * 100)}% of promised capacity). Fix power, cooling or capacity soon.`, kind: 'warn', icon: '⚠️' });
+    }
+    if (ct.breachHours > ECONOMY.slaGraceHours) {
       c.active.splice(i, 1);
       ct.status = 'cancelled';
       c.history.unshift(ct);
-      const fee = Math.round(ct.ratePerHour * 12);
+      const fee = Math.round(ct.ratePerHour * 6);
       s.cash -= fee;
       s.finance.cur.hour.expenses['Contract Penalties'] = (s.finance.cur.hour.expenses['Contract Penalties'] ?? 0) + fee;
       s.finance.cur.day.expenses['Contract Penalties'] = (s.finance.cur.day.expenses['Contract Penalties'] ?? 0) + fee;
       s.finance.cur.month.expenses['Contract Penalties'] = (s.finance.cur.month.expenses['Contract Penalties'] ?? 0) + fee;
       s.finance.totalExpenses += fee;
       pushTx(s, -fee, 'Contract Penalties', `SLA breach penalty: ${ct.customer}`);
-      s.company.reputation = Math.max(0, s.company.reputation - 8);
+      s.company.reputation = Math.max(0, s.company.reputation - 4);
       stat(s, 'contractsBreached');
       log(s, `${ct.customer} cancelled their contract after repeated SLA breaches (−${money(fee)})`, 'bad');
       toast({ title: 'Contract cancelled', body: `${ct.customer} left due to poor service. Check power, cooling and capacity.`, kind: 'bad', icon: '⚠️' });

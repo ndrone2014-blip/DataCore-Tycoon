@@ -145,7 +145,7 @@ export function deriveAll(s: GameState): Derived {
 
     const powerCap = (f.basePower + r.addPower) * (1 + eff(e, 'powerCap') + elecB);
     let coolingCap = (f.baseCooling + r.addCooling) * (1 + eff(e, 'coolingCap') + coolB);
-    if (activeEvent(s, 'heatwave', f.cityId) && s.events.some((x) => x.defId === 'heatwave' && x.cityId === f.cityId)) coolingCap *= 0.75;
+    if (activeEvent(s, 'heatwave', f.cityId) && s.events.some((x) => x.defId === 'heatwave' && x.cityId === f.cityId)) coolingCap *= 0.85;
     const outage = s.events.some((x) => x.defId === 'outage' && x.cityId === f.cityId);
     const load = r.itLoad;
     let powerFactor = load <= 0 ? 1 : Math.min(1, powerCap / load);

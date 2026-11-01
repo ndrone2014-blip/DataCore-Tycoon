@@ -16,7 +16,7 @@ export const ECONOMY = {
 
   // ---- Start ----
   difficulties: {
-    relaxed: { label: 'Relaxed', cash: 1_600_000, competitorCash: 0.7, priceMult: 0.9 },
+    relaxed: { label: 'Relaxed', cash: 1_800_000, competitorCash: 0.5, priceMult: 0.85 },
     standard: { label: 'Standard', cash: 1_000_000, competitorCash: 1, priceMult: 1 },
     hardcore: { label: 'Hardcore', cash: 650_000, competitorCash: 1.4, priceMult: 1.1 },
   } as Record<string, { label: string; cash: number; competitorCash: number; priceMult: number }>,
@@ -122,9 +122,11 @@ export const ECONOMY = {
   loanInterestPerDay: 0.0011,
 
   // ---- Contracts ----
-  maxOpenOffers: 6,
-  offerIntervalHours: [16, 34] as [number, number],
-  offerLifetimeHours: [40, 110] as [number, number],
+  maxOpenOffers: 8,
+  offerIntervalHours: [14, 30] as [number, number],
+  offerLifetimeHours: [100, 220] as [number, number],
+  /** Game hours of poor service before a customer walks away. */
+  slaGraceHours: 96,
   slaPenaltyReputation: 0.4,
 
   // ---- Employees ----
@@ -152,7 +154,8 @@ export const ECONOMY = {
   },
 
   // ---- Events ----
-  eventIntervalHours: [60, 140] as [number, number],
+  eventIntervalHours: [90, 200] as [number, number],
+  decisionIntervalHours: [70, 150] as [number, number],
 
   // ---- Competitors ----
   competitorThinkHours: 6,

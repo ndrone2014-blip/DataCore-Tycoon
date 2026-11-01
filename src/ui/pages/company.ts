@@ -141,6 +141,7 @@ export function renderSettings(app: App): string {
       <label class="set-row"><span>Graphics quality</span><select data-change="setting" data-k="graphics">${['low', 'medium', 'high'].map((g) => `<option value="${g}" ${st.graphics === g ? 'selected' : ''}>${g[0].toUpperCase() + g.slice(1)}</option>`).join('')}</select></label>
       <label class="set-row"><span>Time of day<small>Lighting for the 3D view & map</small></span><select data-change="setting" data-k="timeOfDay">${[['auto', 'Cinematic cycle'], ['day', 'Day'], ['sunset', 'Golden hour'], ['night', 'Night']].map(([v, l]) => `<option value="${v}" ${st.timeOfDay === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${check('bloom', 'Glow effects', st.bloom, 'Neon accents, light halos, pulsing markers')}
+      ${check('celebrations', 'Celebrations', st.celebrations !== false, 'Confetti on level-ups & achievements, income pops')}
       ${range('uiScale', 'UI scale', 0.8, 1.3, 0.05, st.uiScale, (x) => Math.round(x * 100) + '%')}
       ${check('reduceMotion', 'Reduce motion', st.reduceMotion, 'Fewer camera animations')}
       ${check('forceFallbackMap', 'Use offline map', st.forceFallbackMap, 'Skips MapLibre / online tiles (reload required)')}
@@ -154,6 +155,10 @@ export function renderSettings(app: App): string {
       ${check('muted', 'Mute all', st.muted)}
       ${range('sfxVolume', 'Sound effects', 0, 1, 0.05, st.sfxVolume, (x) => Math.round(x * 100) + '%')}
       ${range('musicVolume', 'Ambient music', 0, 1, 0.05, st.musicVolume, (x) => Math.round(x * 100) + '%')}
+      <h3 class="mt">😌 Comfort</h3>
+      ${check('autoContracts', 'Auto-sign contracts', !!st.autoContracts, 'Accept every offer that fits a facility')}
+      ${check('autoLoan', 'Overdraft protection', st.autoLoan !== false, 'The bank covers shortfalls instead of letting cash go negative')}
+      <p class="small muted">Tip: press <b>Space</b> or <b>⏸ Stop time</b> to freeze the economy while you plan — construction and research keep going.</p>
       <h3 class="mt">💾 Save management</h3>
       <label class="set-row"><span>Autosave interval</span><select data-change="setting" data-k="autosaveSeconds">${[10, 15, 30, 60].map((v) => `<option value="${v}" ${st.autosaveSeconds === v ? 'selected' : ''}>${v} seconds</option>`).join('')}</select></label>
       <p class="small muted">Saves go to IndexedDB with a localStorage backup. Offline progress cap: <b>${offlineCap(s).toFixed(0)} hours</b> (upgrade HQ / research automation to extend).</p>

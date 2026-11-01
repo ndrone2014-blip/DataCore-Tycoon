@@ -7,7 +7,7 @@ import { chart } from '../charts';
 import { EQUIPMENT, equipmentById, blueprintById, CAP_LABEL, type EquipmentDef } from '../../config/buildings';
 import { cityById } from '../../config/world';
 import { getParcel } from '../../world/parcels';
-import { install, installQuote, sellEquipment, upgradeQuote, upgradeEquipment, repair, repairQuote, renameFacility, decommission, equipmentUnlocked, unitPrice } from '../../systems/equipment';
+import { autoEquip, install, installQuote, sellEquipment, upgradeQuote, upgradeEquipment, repair, repairQuote, renameFacility, decommission, equipmentUnlocked, unitPrice } from '../../systems/equipment';
 import { landValue } from '../../systems/derive';
 import { capBar } from './shared';
 import { researchById } from '../../config/research';
@@ -128,6 +128,10 @@ function renderFacility(app: App, id: string): string {
       ${contracts.map((c) => `<tr><td><b>${esc(c.customer)}</b></td><td>${esc(c.label)}</td><td>${num(c.amount)} ${CAP_LABEL[c.cap].unit}</td><td>${money(c.ratePerHour)}</td><td class="${c.fulfillment < c.sla ? 'neg' : 'pos'}">${pct(c.fulfillment)} <small>(SLA ${pct(c.sla)})</small></td><td>${Math.ceil(c.hoursLeft / 24)}d</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No contracts here yet. Idle capacity earns spot-market rates — sign contracts for better pay.</p>'}
   </div>
+  <div class="card mt auto-equip">
+    <div class="row between wrap gap"><div><h3>⚡ Auto-equip</h3><p class="small muted">Fill free rack slots with a balanced mix of the best servers you've unlocked. Networking, power and cooling are added automatically so nothing overloads.</p></div>
+    <div class="row gap wrap">${[0.25, 0.5, 1].map((k) => `<button class="btn ${k === 1 ? 'primary' : 'ghost'}" data-act="autoEquip" data-id="${id}" data-k="${k}" ${st.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled' : ''}>Spend up to ${money(Math.max(0, s.cash) * k)}</button>`).join('')}</div></div>
+  </div>
   <div class="card mt">
     <h3>Servers & networking <small class="muted">(rack slots: ${st.slotsUsed}/${f.slots})</small></h3>
     <table class="tbl eq"><thead><tr><th>Equipment</th><th>Installed</th><th>Unit price</th><th>Power</th><th></th></tr></thead><tbody>${servers.map(eqRow).join('')}</tbody></table>
@@ -180,6 +184,7 @@ export function facilityActions(app: App) {
       if (!el.dataset.id) return app.run(() => ({ ok: false, reason: 'Build a data center first' }));
       app.run(() => install(app.s, el.dataset.id!, el.dataset.eq!, Number(el.dataset.n ?? 1)));
     },
+    autoEquip: (el: HTMLElement) => app.run(() => autoEquip(app.s, el.dataset.id!, Math.max(0, app.s.cash) * Number(el.dataset.k))),
     sellEq: (el: HTMLElement) => app.run(() => sellEquipment(app.s, el.dataset.id!, el.dataset.eq!, 1)),
     upgradeEq: (el: HTMLElement) => app.run(() => upgradeEquipment(app.s, el.dataset.id!, el.dataset.eq!)),
     repairDC: (el: HTMLElement) => app.run(() => repair(app.s, el.dataset.id!)),

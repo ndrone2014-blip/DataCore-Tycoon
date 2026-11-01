@@ -45,13 +45,21 @@ npx tsx tests/bot.test.ts 3   # a scripted player plays 3 real-time hours (balan
 
 The current story mission is always shown at the bottom of the sidebar.
 
+### Stress-free tools
+
+- **⏸ Stop time** (top bar or Space) freezes the economy — no income, expenses, rivals or events — while construction and research keep going. Buy, build and upgrade at your own pace.
+- **⚡ Auto-equip** fills a facility with a balanced mix of servers and adds the power, cooling and networking it needs.
+- **Auto-sign contracts** (Contracts page or Settings) accepts every offer that fits.
+- **Overdraft protection** covers shortfalls with a bank loan, and being away can never cost more than a quarter of your cash.
+- **Opportunity cards** pop up now and then with choices: investors, GPU rentals, press features, bulk deals, gambles and more. Ignore them and nothing bad happens.
+
 ### Controls
 
 | Action | Input |
 |---|---|
 | Pan / zoom map | Drag / mouse wheel |
 | Orbit / pan / zoom 3D view | Drag / right-drag / wheel |
-| Pause | Space |
+| Stop / resume time | Space |
 | Game speed 1×/2×/4× | 1 / 2 / 3 |
 | World map | M |
 | Back / close dialog | Esc |

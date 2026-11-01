@@ -217,7 +217,7 @@ function propertyPanel(app: App, p: ParcelDef): string {
       ${gauge(fs.itLoad, fs.powerCap, 'Power', `${power(fs.itLoad)} / ${power(fs.powerCap)}`)}
       ${gauge(fs.itLoad, fs.coolingCap, 'Cooling', `${power(fs.itLoad)} / ${power(fs.coolingCap)}`)}
       <div class="kv small">${(['cpu', 'gpu', 'storage'] as const).map((c) => `<span>${CAP_LABEL[c].name}</span><b>${num(fs.delivered[c])} ${CAP_LABEL[c].unit}</b>`).join('')}</div>
-      <div class="row gap mt"><button class="btn primary" data-act="manageDC" data-id="${f.id}">Manage facility & servers</button></div>
+      <div class="row gap mt wrap"><button class="btn primary" data-act="autoEquip" data-id="${f.id}" data-k="0.5" ${fs.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled title="No free slots or not enough cash"' : ''}>⚡ Auto-equip (${money(Math.max(0, s.cash) * 0.5)})</button><button class="btn ghost" data-act="manageDC" data-id="${f.id}">Manage facility</button></div>
     </div>`;
   } else if (st.status === 'hq') {
     const q = hqUpgradeQuote(s);

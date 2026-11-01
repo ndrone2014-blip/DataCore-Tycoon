@@ -193,3 +193,68 @@ export function upgradeHQ(s: GameState): { ok: boolean; reason?: string } {
 
 export const SERVER_EQUIPMENT = EQUIPMENT.filter((e) => e.kind === 'server');
 export const INFRA_EQUIPMENT = EQUIPMENT.filter((e) => e.kind === 'infra');
+
+/**
+ * One-click auto-equip: fills a facility with a balanced mix of servers within a budget,
+ * adding networking, power and cooling infrastructure as needed so nothing overloads.
+ */
+export function autoEquip(s: GameState, facilityId: string, budget: number): { ok: boolean; reason?: string; count: number; spent: number } {
+  const f = s.facilities[facilityId];
+  if (!f || f.isHQ) return { ok: false, reason: 'Unknown facility', count: 0, spent: 0 };
+  const startCash = s.cash;
+  let count = 0;
+  const unlocked = (ids: string[]) => ids.filter((id) => equipmentUnlocked(s, equipmentById(id)).ok);
+  const gpus = unlocked(['accel_x', 'accel', 'gpu_ent', 'gpu_ai']);
+  const cpus = unlocked(['cpu_hd', 'cpu_std']);
+  const stores = unlocked(['storage_hd', 'storage']);
+  const nets = unlocked(['network_hs', 'network']);
+  const powers = unlocked(['substation', 'pdu']);
+  const cools = unlocked(['liquid', 'cooling_adv', 'cooling_air']);
+  const target: Record<string, number> = gpus.length ? { gpu: 0.55, cpu: 0.3, storage: 0.15 } : { gpu: 0, cpu: 0.75, storage: 0.25 };
+  const spentSoFar = () => startCash - s.cash;
+  const tryInstall = (ids: string[]): boolean => {
+    for (const id of ids) {
+      const q = installQuote(s, facilityId, id, 1);
+      if (q.ok && !q.warn && spentSoFar() + q.cost <= budget) {
+        install(s, facilityId, id, 1);
+        count++;
+        return true;
+      }
+    }
+    return false;
+  };
+  for (let guard = 0; guard < 600; guard++) {
+    const der = deriveAll(s);
+    const st = der.fac[facilityId];
+    if (!st) break;
+    if (st.slotsUsed >= f.slots) break;
+    // network first so new servers aren't bottlenecked
+    if (st.servers + 1 > st.network + 4 && tryInstall(nets)) continue;
+    // pick the server class furthest below its target share
+    const share: Record<string, number> = { gpu: 0, cpu: 0, storage: 0 };
+    let total = 0;
+    for (const [id, n] of Object.entries(f.equipment)) {
+      const e = equipmentById(id);
+      if (e.kind === 'server' && e.cap) { share[e.cap] += n; total += n; }
+    }
+    const order = (['gpu', 'cpu', 'storage'] as const)
+      .filter((c) => target[c] > 0)
+      .sort((a, b) => (share[a] / Math.max(1, total) - target[a]) - (share[b] / Math.max(1, total) - target[b]));
+    let placed = false;
+    for (const cap of order) {
+      const ids = cap === 'gpu' ? gpus : cap === 'cpu' ? cpus : stores;
+      for (const id of ids) {
+        const e = equipmentById(id);
+        // make room in power / cooling before installing
+        if (st.itLoad + e.power > st.powerCap * 0.98) { if (tryInstall(powers)) { placed = true; break; } continue; }
+        if (st.itLoad + e.power > st.coolingCap * 0.98) { if (tryInstall(cools)) { placed = true; break; } continue; }
+        if (tryInstall([id])) { placed = true; break; }
+      }
+      if (placed) break;
+    }
+    if (!placed) break;
+  }
+  if (!count) return { ok: false, reason: budget < 20_000 ? 'Budget too small' : 'Nothing more fits (check slots, bays and budget)', count, spent: 0 };
+  toast({ title: 'Auto-equip complete', body: `Installed ${count} items for ${money(spentSoFar())} at ${f.name}.`, kind: 'good', icon: '⚡' });
+  return { ok: true, count, spent: spentSoFar() };
+}

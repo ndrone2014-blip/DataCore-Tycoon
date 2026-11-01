@@ -191,6 +191,9 @@ export interface Settings {
   mapLabels: boolean;
   timeOfDay: 'auto' | 'day' | 'sunset' | 'night';
   bloom: boolean;
+  autoContracts: boolean;
+  autoLoan: boolean;
+  celebrations: boolean;
 }
 
 export interface LogEntry {
@@ -257,6 +260,25 @@ export interface GameState {
   idCounter: number;
   permanent: Record<string, number>; // permanent bonuses from achievements
   offline: { capHours: number };
+  /** Temporary bonuses/maluses from opportunity cards. */
+  buffs?: Buff[];
+  /** Pending opportunity card. */
+  decision?: PendingDecision;
+  nextDecisionAt?: number;
+}
+
+export interface Buff {
+  key: string;
+  value: number;
+  endsAt: number;
+  label: string;
+}
+
+export interface PendingDecision {
+  id: string;
+  defId: string;
+  expiresAt: number;
+  data: Record<string, number>;
 }
 
 export function defaultSettings(): Settings {
@@ -275,6 +297,9 @@ export function defaultSettings(): Settings {
     mapLabels: true,
     timeOfDay: 'auto',
     bloom: true,
+    autoContracts: false,
+    autoLoan: true,
+    celebrations: true,
   };
 }
 

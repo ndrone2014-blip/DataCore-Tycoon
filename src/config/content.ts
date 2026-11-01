@@ -68,13 +68,13 @@ export interface EventDef {
 }
 
 export const EVENT_DEFS: EventDef[] = [
-  { id: 'heatwave', title: 'Heat Wave', desc: 'Cooling capacity −25% in {city}.', hours: [36, 72], scope: 'city', good: false, weight: 3 },
-  { id: 'outage', title: 'Grid Outage', desc: 'Utility power lost in {city}. Facilities without enough backup generators go dark.', hours: [6, 14], scope: 'city', good: false, weight: 2 },
-  { id: 'gpu_shortage', title: 'GPU Shortage', desc: 'Server and accelerator prices +30%.', hours: [48, 96], scope: 'global', good: false, weight: 2 },
+  { id: 'heatwave', title: 'Heat Wave', desc: 'Cooling capacity −15% in {city}.', hours: [24, 48], scope: 'city', good: false, weight: 2 },
+  { id: 'outage', title: 'Grid Outage', desc: 'Utility power lost in {city}. Facilities without enough backup generators go dark.', hours: [3, 8], scope: 'city', good: false, weight: 1 },
+  { id: 'gpu_shortage', title: 'GPU Shortage', desc: 'Server and accelerator prices +20%.', hours: [36, 72], scope: 'global', good: false, weight: 1 },
   { id: 'chip_sale', title: 'Hardware Clearance Sale', desc: 'All equipment −20%.', hours: [24, 48], scope: 'global', good: true, weight: 2 },
   { id: 'ai_boom', title: 'AI Boom', desc: 'AI compute spot prices +40% and more GPU contracts.', hours: [48, 120], scope: 'global', good: true, weight: 3 },
   { id: 'tax_break', title: 'Tax Incentive', desc: 'Construction costs −20% in {city}.', hours: [48, 96], scope: 'city', good: true, weight: 2 },
-  { id: 'energy_spike', title: 'Energy Price Spike', desc: 'Electricity +50% in {city}.', hours: [24, 72], scope: 'city', good: false, weight: 2 },
+  { id: 'energy_spike', title: 'Energy Price Spike', desc: 'Electricity +30% in {city}.', hours: [24, 48], scope: 'city', good: false, weight: 1 },
   { id: 'demand_surge', title: 'Cloud Demand Surge', desc: 'Spot prices +30% in {city}.', hours: [36, 96], scope: 'city', good: true, weight: 3 },
 ];
 

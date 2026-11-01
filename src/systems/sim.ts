@@ -15,7 +15,8 @@ import { tickCompetitors, createCompetitors, seedCompetitors } from './competito
 import { tickEvents } from './events';
 import { checkAchievements, rollDailies } from './progression';
 import { deptBonus, getEffects, eff, offlineCapHours } from './modifiers';
-import { emit } from '../core/bus';
+import { emit, toast } from '../core/bus';
+import { tickDecisions } from './decisions';
 
 export interface NewGameOptions {
   name: string;
@@ -198,6 +199,24 @@ export function step(s: GameState, realSeconds: number): Derived {
   tickEmployees(s, dt);
   tickCompetitors(s, dt, realSeconds, d);
   tickEvents(s);
+  tickDecisions(s, d);
+  if (s.buffs?.length) s.buffs = s.buffs.filter((b) => b.endsAt > s.gameHours);
+
+  // overdraft safety net: automatically draw on the credit line instead of going negative
+  if (s.cash < 0 && s.settings.autoLoan !== false) {
+    const limit = loanLimit(s, d);
+    const need = Math.ceil((-s.cash + 25_000) / 10_000) * 10_000;
+    const amt = Math.min(limit, need);
+    if (amt > 0) {
+      s.debt += amt;
+      s.cash += amt;
+      s.finance.ledger.unshift({ t: s.gameHours, amount: amt, cat: 'Loan', desc: 'Automatic overdraft protection' });
+      if (!(s.stats.lastOverdraftToast > s.gameHours - 48)) {
+        s.stats.lastOverdraftToast = s.gameHours;
+        toast({ title: 'Overdraft protection', body: `The bank covered a shortfall with a ${Math.round(amt / 1000)}K loan. Repay it on the Finances page when you can.`, kind: 'warn', icon: '🏦' });
+      }
+    }
+  }
 
   // market demand grows over time (the AI boom never stops)
   const boom = s.events.some((x) => x.defId === 'ai_boom');
@@ -206,6 +225,23 @@ export function step(s: GameState, realSeconds: number): Derived {
   rollReports(s, prev, d);
   // structural changes (new facility, etc.) need fresh derived stats for the UI
   return Object.keys(s.facilities).length !== facBefore ? deriveAll(s) : d;
+}
+
+/**
+ * Time is stopped: the economy clock is frozen (no income, expenses, rivals or events),
+ * but construction and research keep advancing so you can plan and build stress-free.
+ */
+export function advanceFrozen(s: GameState, realSeconds: number): Derived {
+  const speed = constructionSpeed(s);
+  for (const pr of Object.values(s.projects)) {
+    pr.doneSeconds += realSeconds * speed;
+    if (pr.doneSeconds >= pr.totalSeconds) {
+      if (pr.kind === 'demolish') finishDemolition(s, pr.id);
+      else finishBuild(s, pr.id);
+    }
+  }
+  tickResearch(s, realSeconds);
+  return deriveAll(s);
 }
 
 /** Advance in sub-steps that never straddle an hour boundary, so hourly reports are exact. */
@@ -260,8 +296,16 @@ export function catchUp(s: GameState, nowMs = Date.now(), maxSeconds?: number): 
   let left = elapsed;
   while (left > 0) {
     const chunk = Math.min(stepSec, left);
-    advance(s, chunk);
+    if (s.paused) advanceFrozen(s, chunk);
+    else advance(s, chunk);
     left -= chunk;
+  }
+  // offline safety net: being away can never cost more than a quarter of your cash
+  const floor = before.cash > 0 ? before.cash * 0.75 : before.cash;
+  if (s.cash < floor) {
+    const refund = floor - s.cash;
+    s.cash = floor;
+    s.finance.ledger.unshift({ t: s.gameHours, amount: refund, cat: 'Safety Net', desc: 'Offline loss protection' });
   }
   return {
     seconds: elapsed, cappedFrom,
