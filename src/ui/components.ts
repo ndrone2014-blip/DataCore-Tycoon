@@ -62,7 +62,8 @@ export function showToast(t: ToastMsg) {
   const el = document.createElement('div');
   el.className = `toast ${t.kind ?? 'info'}`;
   el.innerHTML = `<div class="toast-icon">${t.icon ?? 'ℹ️'}</div><div><b>${esc(t.title)}</b>${t.body ? `<p>${esc(t.body)}</p>` : ''}</div>`;
-  el.addEventListener('click', () => el.remove());
+  if (t.onClick) el.classList.add('clickable');
+  el.addEventListener('click', () => { el.remove(); t.onClick?.(); });
   root.appendChild(el);
   while (root.children.length > 5) root.firstElementChild?.remove();
   setTimeout(() => el.classList.add('out'), t.kind === 'level' || t.kind === 'achievement' ? 6000 : 4200);

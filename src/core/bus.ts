@@ -24,6 +24,11 @@ export interface ToastMsg {
   body?: string;
   kind?: 'info' | 'good' | 'bad' | 'warn' | 'level' | 'achievement';
   icon?: string;
+  /** 'contract' = routine contract news, 'contract-problem' = a contract is at risk. Filtered by Settings. */
+  channel?: 'contract' | 'contract-problem';
+  /** Clicking the toast opens this data center's management page. */
+  dcId?: string;
+  onClick?: () => void;
 }
 export const toast = (t: ToastMsg) => emit('toast', t);
 export const sfx = (name: string) => emit('sfx', name);

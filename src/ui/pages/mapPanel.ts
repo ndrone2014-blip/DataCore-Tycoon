@@ -11,9 +11,10 @@ import { BLUEPRINTS, CAP_LABEL } from '../../config/buildings';
 import { HQ_TIERS } from '../../config/economy';
 import { money, area, esc, pct, power, num, duration } from '../../core/format';
 import { bar, btn, confirmDialog, gauge } from '../components';
-import { projectCard } from './shared';
+import { dcNeed, projectCard } from './shared';
 import { openBuildModal } from './buildModal';
 import { staffCap } from '../../systems/employees';
+import { isMobile } from '../../core/device';
 
 export function renderMapPanel(app: App): string {
   const m = app.map;
@@ -37,17 +38,47 @@ function cityRow(app: App, id: string): string {
   </button>`;
 }
 
+/** Plain-English answer to "how do I unlock a new city?", with one-tap unlock buttons. */
+function marketsCard(app: App): string {
+  const s = app.s;
+  const locked = CITIES.filter((c) => !s.unlockedCities.includes(c.id)).sort((a, b) => a.unlockLevel - b.unlockLevel || a.license - b.license);
+  if (!locked.length) return '';
+  const ready = locked.filter((c) => s.level >= c.unlockLevel);
+  const next = locked.filter((c) => s.level < c.unlockLevel).slice(0, 2);
+  return `<div class="card markets-card">
+    <h3>🔓 Unlocking new cities</h3>
+    <p class="small muted">Each city needs your company to reach a <b>level</b>, then a one-time <b>market license</b>. Earn levels from building, contracts and missions. You are level ${s.level}.</p>
+    ${[...ready, ...next].map((c) => {
+      const lvlOk = s.level >= c.unlockLevel;
+      return `<div class="market-row"><span class="flag">${countryById(c.country).flag}</span><span class="grow"><b>${esc(c.name)}</b><small>Level ${c.unlockLevel}${c.license ? ` · ${money(c.license)} license` : ' · free'}</small></span>
+        ${lvlOk ? btn('Unlock', 'unlockCity', { id: c.id }, 'primary sm', s.cash < c.license ? `Need ${money(c.license)}` : undefined) : `<span class="tag">Lv ${c.unlockLevel}</span>`}</div>`;
+    }).join('')}
+  </div>`;
+}
+
+function myFacilitiesCard(app: App): string {
+  const s = app.s, d = app.d;
+  const list = Object.values(s.facilities).filter((f) => !f.isHQ);
+  if (!list.length) return '';
+  const ranked = list.map((f) => ({ f, need: dcNeed(f, d.fac[f.id]) })).sort((a, b) => (d.fac[a.f.id]?.slotsUsed ?? 0) / a.f.slots - (d.fac[b.f.id]?.slotsUsed ?? 0) / b.f.slots);
+  return `<h4 class="sect">Your data centers (${list.length})</h4>
+    ${ranked.slice(0, 6).map(({ f, need }) => `<button class="list-row ${need.level !== 'ok' ? 'needs' : ''}" data-act="mapProp" data-id="${f.parcelId}"><span class="flag">${need.level === 'ok' ? '🖥️' : '⚠️'}</span><span class="grow"><b>${esc(f.name)}</b><small>${esc(cityById(f.cityId).name)} · ${need.label}</small></span></button>`).join('')}
+    ${list.length > 6 ? `<button class="link sm" data-act="nav" data-page="datacenters">See all ${list.length}</button>` : ''}`;
+}
+
 function worldPanel(app: App): string {
   const s = app.s, d = app.d;
   const regions = ['North America', 'Europe', 'Asia', 'Oceania'] as const;
   return `
-    <div class="panel-head"><h2>🌐 World Map</h2><p class="muted">Click a highlighted country or a city marker. Scroll to zoom, drag to pan.</p></div>
+    <div class="panel-head"><h2>🌐 World Map</h2><p class="muted">${isMobile() ? 'Tap a city marker. Pinch to zoom, drag to pan.' : 'Click a highlighted country or a city marker. Scroll to zoom, drag to pan.'}</p></div>
     <div class="grid2 mini-stats">
       <div><label>Facilities</label><b>${d.totals.facilities}</b></div>
       <div><label>Properties</label><b>${d.totals.properties}</b></div>
       <div><label>Cities</label><b>${d.totals.cities}</b></div>
       <div><label>Countries</label><b>${d.totals.countries}</b></div>
     </div>
+    ${marketsCard(app)}
+    ${myFacilitiesCard(app)}
     ${regions.map((r) => `<h4 class="sect">${r}</h4>${CITIES.filter((c) => c.region === r).map((c) => cityRow(app, c.id)).join('')}`).join('')}
     <h4 class="sect">Competitors</h4>
     ${s.competitors.map((c) => `<div class="list-row static"><span class="logo-dot" style="background:${c.color}">${esc(c.logo)}</span><span class="grow"><b>${esc(c.name)}</b><small>${c.sites.length} sites · ${new Set(c.sites.map((x) => x.cityId)).size} cities · ${money(c.valuation)}</small></span></div>`).join('')}`;
@@ -98,7 +129,7 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
   const zone = zoneId ? getZone(zoneId) : undefined;
   return `
     <div class="panel-head"><h2>${countryById(city.country).flag} ${esc(city.name)}</h2><p class="muted">${esc(city.districtName)} · ${lay.parcels.length} parcels · ${lay.zones.length} development zones</p></div>
-    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${s.level < city.unlockLevel ? `Reach level ${city.unlockLevel} to enter.` : ''} ${btn(`Buy market license ${money(city.license)}`, 'unlockCity', { id: cityId }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < city.license ? `Need ${money(city.license)}` : undefined)}</div>`}
+    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${s.level < city.unlockLevel ? `Reach company level ${city.unlockLevel} (you are level ${s.level}), then buy the market license.` : 'Buy the market license to start building here.'} ${btn(`Buy market license ${money(city.license)}`, 'unlockCity', { id: cityId }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < city.license ? `Need ${money(city.license)}` : undefined)}</div>`}
     <div class="card">
       <div class="row between"><b>Market</b><small class="muted">Spot price ${pct(d.cityPrice[cityId] ?? 1)}</small></div>
       ${bar(Math.min(1, supply / demand), supply / demand > 0.9 ? 'warn' : '', `Supply ${num(supply)} / demand ${num(demand)} CU`)}
@@ -111,8 +142,9 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
     ${mine.length ? mine.map(([pid, ps]) => {
       const p = getParcel(pid)!;
       const f = ps.facilityId ? s.facilities[ps.facilityId] : undefined;
-      return `<button class="list-row" data-act="mapProp" data-id="${pid}"><span class="flag">${f ? (f.isHQ ? '🏢' : '🖥️') : PROPERTY_TYPE_INFO[p.type].icon}</span><span class="grow"><b>${esc(f?.name ?? p.name)}</b><small>${statusLabel(ps.status)} · ${area(p.area)}</small></span></button>`;
-    }).join('') : '<p class="muted small">None yet — click any lot on the map.</p>'}
+      const need = f && !f.isHQ ? dcNeed(f, d.fac[f.id]) : null;
+      return `<button class="list-row ${need && need.level !== 'ok' ? 'needs' : ''}" data-act="mapProp" data-id="${pid}"><span class="flag">${need && need.level !== 'ok' ? '⚠️' : f ? (f.isHQ ? '🏢' : '🖥️') : PROPERTY_TYPE_INFO[p.type].icon}</span><span class="grow"><b>${esc(f?.name ?? p.name)}</b><small>${need ? need.label : statusLabel(ps.status)} · ${area(p.area)}</small></span></button>`;
+    }).join('') : `<p class="muted small">None yet. ${isMobile() ? 'Tap' : 'Click'} any building in the city to see its price.</p>`}
     <h4 class="sect row between">Cheapest available lots
       <select data-change="mapFilter" class="sel-sm">${['all', 'empty_lot', 'retail', 'restaurant', 'warehouse', 'office', 'industrial', 'industrial_land', 'shopping_center', 'premium'].map((t) => `<option value="${t}" ${filter === t ? 'selected' : ''}>${t === 'all' ? 'All types' : PROPERTY_TYPE_INFO[t as keyof typeof PROPERTY_TYPE_INFO].label}</option>`).join('')}</select></h4>
     ${avail.map(({ p, price }) => `<button class="list-row" data-act="mapProp" data-id="${p.id}"><span class="flag">${PROPERTY_TYPE_INFO[p.type].icon}</span><span class="grow"><b>${esc(p.name)}</b><small>${PROPERTY_TYPE_INFO[p.type].label} · ${area(p.area)}${p.zoneId ? ' · in zone' : ''}</small></span><b class="price">${money(price)}</b></button>`).join('') || '<p class="muted small">No lots match.</p>'}`;

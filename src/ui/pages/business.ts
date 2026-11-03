@@ -2,11 +2,11 @@
 
 import type { App } from '../app';
 import { money, num, pct, esc, duration, gameDuration } from '../../core/format';
-import { stat, empty, btn, bar, confirmDialog, openModal, closeModal } from '../components';
+import { stat, empty, btn, bar, confirmDialog, openModal, closeModal , showToast } from '../components';
 import { RESEARCH, researchById } from '../../config/research';
 import { researchState, canResearch, startResearch, researchSpeed } from '../../systems/research';
 import { DEPARTMENTS, CUSTOMER_TYPES, type Department } from '../../config/content';
-import { hire, fire, promote, assign, hireCost, promoteCost, staffCap, refreshCandidates } from '../../systems/employees';
+import { hire, fire, promote, assign, autoAssignStaff, bulkAssign, hireCost, promoteCost, staffCap, refreshCandidates } from '../../systems/employees';
 import { deptBonus } from '../../systems/modifiers';
 import { HQ_TIERS } from '../../config/economy';
 import { hqUpgradeQuote, upgradeHQ } from '../../systems/equipment';
@@ -75,7 +75,17 @@ export function renderEmployees(app: App): string {
     </div>
   </div>
   <div class="card mt">
-    <div class="row between"><h3>Staff (${s.employees.length})</h3><small class="muted">Assign technicians to a facility for double effect there.</small></div>
+    <div class="row between wrap gap"><h3>Staff (${s.employees.length})</h3>
+      <div class="row gap wrap staff-tools">
+        <button class="btn primary sm" data-act="autoAssign" ${s.employees.length ? '' : 'disabled'}>⚡ Auto-assign everyone</button>
+        <label class="check"><input type="checkbox" data-change="setting" data-k="autoAssignStaff" ${s.settings.autoAssignStaff ? 'checked' : ''}> Keep staff assigned automatically</label>
+      </div></div>
+    <div class="row gap wrap mt small bulk-assign"><span class="muted">Move</span>
+      <select data-change="bulkDept"><option value="all">everyone</option>${depts.map((x) => `<option value="${x}" ${app.ui.bulkDept === x ? 'selected' : ''}>${DEPARTMENTS[x].label}</option>`).join('')}</select>
+      <span class="muted">to</span>
+      <select data-change="bulkTo"><option value="hq">Headquarters</option>${facs.map((f) => `<option value="${f.id}" ${app.ui.bulkTo === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select>
+      <button class="btn ghost sm" data-act="bulkMove">Move</button></div>
+    <p class="small muted">On-site staff work twice as well at that site but barely help elsewhere; HQ staff help everywhere. Auto-assign works out the best split for you.</p>
     ${s.employees.length ? `<table class="tbl"><thead><tr><th>Name</th><th>Department</th><th>Skill</th><th>Experience</th><th>Performance</th><th>Salary</th><th>Assignment</th><th></th></tr></thead><tbody>
     ${s.employees.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${DEPARTMENTS[e.dept].icon} ${DEPARTMENTS[e.dept].label}</td><td>${'★'.repeat(e.skill)}<span class="muted">${'☆'.repeat(5 - e.skill)}</span></td><td>${Math.round(e.exp)}h</td><td>${bar(e.perf / 100, e.perf < 50 ? 'bad' : '', Math.round(e.perf) + '%')}</td><td>${money(e.salary)}/h</td>
       <td><select data-change="assign" data-id="${e.id}"><option value="hq" ${e.assigned === 'hq' ? 'selected' : ''}>Headquarters</option>${facs.map((f) => `<option value="${f.id}" ${e.assigned === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></td>
@@ -139,12 +149,25 @@ export function renderContracts(app: App): string {
     ${stat('Spot market revenue/h', money(Object.values(d.fac).reduce((a, f) => a + f.revenue.spot, 0)))}
     ${stat('Reputation', `${Math.round(s.company.reputation)}/100`, 'Affects contract rates')}
   </div>
-  <div class="card mt"><div class="row between wrap gap">${tabs}<label class="check auto-toggle"><input type="checkbox" data-change="setting" data-k="autoContracts" ${s.settings.autoContracts ? 'checked' : ''}> <b>Auto-sign contracts</b> <span class="muted">— accept every offer that fits a facility</span></label></div>${body}</div>`;
+  <div class="card mt"><div class="row between wrap gap">${tabs}<label class="set-inline small">Alerts <select data-change="setting" data-k="contractAlerts"><option value="all" ${(s.settings.contractAlerts ?? 'all') === 'all' ? 'selected' : ''}>All</option><option value="problems" ${s.settings.contractAlerts === 'problems' ? 'selected' : ''}>Problems only</option><option value="off" ${s.settings.contractAlerts === 'off' ? 'selected' : ''}>Off</option></select></label><label class="check auto-toggle"><input type="checkbox" data-change="setting" data-k="autoContracts" ${s.settings.autoContracts ? 'checked' : ''}> <b>Auto-sign contracts</b> <span class="muted">— accept every offer that fits a facility</span></label></div>${body}</div>`;
 }
 
 export function businessActions(app: App) {
+  const staffActions = {
+    autoAssign: () => {
+      const n = autoAssignStaff(app.s);
+      showToast({ title: n ? `Reassigned ${n} staff` : 'Staff already well placed', body: n ? 'Everyone is now where they help most.' : undefined, kind: 'good', icon: '👥' });
+      app.render();
+    },
+    bulkMove: () => {
+      const n = bulkAssign(app.s, app.ui.bulkDept ?? 'all', app.ui.bulkTo ?? 'hq');
+      showToast({ title: `Moved ${n} staff`, kind: 'good', icon: '👥' });
+      app.render();
+    },
+  };
   return {
     research: (el: HTMLElement) => app.run(() => startResearch(app.s, el.dataset.id!)),
+    ...staffActions,
     hire: (el: HTMLElement) => app.run(() => hire(app.s, el.dataset.id!)),
     fire: (el: HTMLElement) => {
       const e = app.s.employees.find((x) => x.id === el.dataset.id);
@@ -176,6 +199,8 @@ export function businessActions(app: App) {
 
 export function businessChanges(app: App) {
   return {
+    bulkDept: (el: HTMLElement) => { app.ui.bulkDept = (el as HTMLSelectElement).value; },
+    bulkTo: (el: HTMLElement) => { app.ui.bulkTo = (el as HTMLSelectElement).value; },
     assign: (el: HTMLElement) => { assign(app.s, el.dataset.id!, (el as HTMLSelectElement).value); app.render(); },
     reassign: (el: HTMLElement) => app.run(() => reassignContract(app.s, el.dataset.id!, (el as HTMLSelectElement).value)),
     noop: () => {},

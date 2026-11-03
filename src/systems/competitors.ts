@@ -7,12 +7,14 @@ import { COMPETITOR_DEFS } from '../config/content';
 import { BLUEPRINTS, type BlueprintDef } from '../config/buildings';
 import { ECONOMY } from '../config/economy';
 import { CITIES, cityById, type CityDef } from '../config/world';
-import { getCityLayout, getZone, type ParcelDef } from '../world/parcels';
+import { getCityLayout, getParcel, getZone, type ParcelDef } from '../world/parcels';
+import { newId } from '../core/state';
+import { autoEquip } from './equipment';
 import { landValue, type Derived } from './derive';
 import { demolitionSeconds, parcelState } from './property';
-import { log } from './ledger';
+import { canAfford, log, spend } from './ledger';
 import { rand, randRange, pick } from '../core/rng';
-import { emit, toast } from '../core/bus';
+import { emit, sfx, toast } from '../core/bus';
 import { money } from '../core/format';
 
 const cuPerSlot = (tech: number) => 40 * Math.pow(1.35, tech);
@@ -229,6 +231,65 @@ export function tickCompetitors(s: GameState, dt: number, realDt: number, der: D
       think(s, c, der);
     }
   }
+}
+
+/** What it costs to buy a rival outright: their valuation (paying for their cash means you also receive it). */
+export function acquisitionQuote(s: GameState, compId: string): { ok: boolean; reason?: string; price: number; cashAcquired: number; facilities: number; lots: number } {
+  const c = s.competitors.find((x) => x.id === compId);
+  if (!c) return { ok: false, reason: 'Company no longer exists', price: 0, cashAcquired: 0, facilities: 0, lots: 0 };
+  const price = Math.round(c.valuation);
+  const lots = Object.values(s.parcels).filter((p) => p.owner === c.id).length;
+  const facilities = c.sites.filter((x) => x.stage === 'operational').length;
+  const cashAcquired = Math.max(0, Math.round(c.cash));
+  if (!canAfford(s, price)) return { ok: false, reason: `Need ${money(price)} in cash`, price, cashAcquired, facilities, lots };
+  return { ok: true, price, cashAcquired, facilities, lots };
+}
+
+/** Buy a rival: their land and running data centers become yours, their projects stop, and they leave the market. */
+export function acquireCompetitor(s: GameState, compId: string): { ok: boolean; reason?: string } {
+  const q = acquisitionQuote(s, compId);
+  if (!q.ok) return { ok: false, reason: q.reason };
+  const c = s.competitors.find((x) => x.id === compId)!;
+  spend(s, q.price, 'Acquisitions', `Acquired ${c.name}`);
+  // their cash comes with the company (not counted as operating revenue)
+  s.cash += q.cashAcquired;
+  s.finance.ledger.unshift({ t: s.gameHours, amount: q.cashAcquired, cat: 'Acquisitions', desc: `Cash on ${c.name}'s balance sheet` });
+  const siteByParcel = new Map(c.sites.map((x) => [x.parcelId, x]));
+  const newFacilities: { id: string; fill: number; slots: number }[] = [];
+  for (const [pid, ps] of Object.entries(s.parcels)) {
+    if (ps.owner !== c.id) continue;
+    const site = siteByParcel.get(pid);
+    const p = getParcel(pid);
+    const value = landValue(s, pid);
+    ps.owner = 'player';
+    ps.boughtFor = value;
+    ps.boughtAt = s.gameHours;
+    if (p && !s.unlockedCities.includes(p.cityId)) s.unlockedCities.push(p.cityId);
+    if (site?.stage === 'operational') {
+      const bp = BLUEPRINTS.find((b) => b.id === site.blueprintId)!;
+      const fid = newId(s, 'dc');
+      s.facilities[fid] = {
+        id: fid, parcelId: pid, cityId: site.cityId, name: `${bp.name} (ex-${c.name})`, blueprintId: bp.id,
+        slots: bp.slots, bays: bp.bays, basePower: bp.power, baseCooling: bp.cooling, floors: bp.floors, style: 'concrete', color: s.company.color,
+        footprint: bp.footprint, equipment: {}, condition: 90, builtAt: s.gameHours, buildCost: bp.cost, shellValue: bp.cost * 0.72,
+        equipmentSpent: 0, revenueTotal: 0, profitTotal: 0,
+      };
+      ps.status = 'facility';
+      ps.facilityId = fid;
+      newFacilities.push({ id: fid, fill: site.maxCu ? site.cu / site.maxCu : 0, slots: bp.slots });
+    } else if (ps.status === 'demolishing' || ps.status === 'construction') {
+      ps.status = 'cleared'; // their half-finished work is written off, the land is ready to build on
+    }
+  }
+  s.competitors = s.competitors.filter((x) => x.id !== c.id);
+  // their hardware comes along, roughly as full as it was, using gear you've unlocked
+  for (const nf of newFacilities) autoEquip(s, nf.id, Infinity, { free: true, maxSlots: Math.round(nf.slots * Math.min(1, nf.fill)) });
+  s.stats.acquisitions = (s.stats.acquisitions ?? 0) + 1;
+  log(s, `Acquired ${c.name} for ${money(q.price)}: ${q.lots} properties and ${q.facilities} data centers joined the company`, 'good');
+  toast({ title: `${c.name} acquired!`, body: `${q.lots} properties and ${q.facilities} data centers are now yours.${s.competitors.length ? '' : ' You have no rivals left.'}`, kind: 'achievement', icon: '🤝' });
+  sfx('levelup');
+  emit('world');
+  return { ok: true };
 }
 
 export function competitorCities(c: Competitor): string[] {

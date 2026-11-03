@@ -24,7 +24,7 @@ or `python3 -m http.server 8080` and open http://localhost:8080.
 
 The current build version is shown at the bottom of the title screen and in Settings → About, so you can confirm which version a site is serving.
 
-An internet connection is used for real map tiles, the 3D engine and charts. Without it the game still runs fully using built-in offline fallbacks (simplified world map, isometric property view, built-in charts).
+An internet connection is used for real map tiles and charts. The street-level city needs no downloads at all. Without a connection the game still runs fully using built-in fallbacks (simplified world map, built-in charts).
 
 ## Develop
 
@@ -39,8 +39,9 @@ npx tsx tests/bot.test.ts 3   # a scripted player plays 3 real-time hours (balan
 
 ## How to play
 
-1. **World Map** — the globe shows every market. Click a highlighted country, then a city.
-2. **City** — each city has a fictional tech district laid over the real map: individual lots and dashed **development zones**. Click any lot.
+0. **Start screen** — choose **PC** or **Mobile**. This sets the controls, layout and graphics limits (tick *Remember my choice* to skip it; change it any time in Settings).
+1. **World Map** — the globe shows every market. Click a highlighted country, then a city. **To unlock a new city**, reach its company level, then buy its market license; the World Map panel lists what's next with one-tap Unlock buttons.
+2. **City** — zoom in and the map hands over to a full 3D city. Every lot is a real building. Click any one; dashed outlines mark **development zones**, and name tags float over your own properties.
 3. **Property view** — buy it, **demolish** the old building, then **Build data center**: pick a premade blueprint or design a **custom building** (floors, footprint, exterior, colors, cooling, electrical, generators, security).
 4. **Construction** runs through 8 visible stages. Pay to speed it up (or finish instantly).
 5. **Data Centers** — install servers, GPUs, accelerators, networking, cooling, power and generators. Watch power, cooling, temperature and performance.
@@ -52,8 +53,12 @@ The current story mission is always shown at the bottom of the sidebar.
 ### Stress-free tools
 
 - **⏸ Stop time** (top bar or Space) freezes the economy — no income, expenses, rivals or events — while construction and research keep going. Buy, build and upgrade at your own pace.
-- **⚡ Auto-equip** fills a facility with a balanced mix of servers and adds the power, cooling and networking it needs.
+- **⚡ Auto-equip** fills a facility with a balanced mix of servers and adds the power, cooling and networking it needs, at any budget, and tells you exactly why if it has to stop.
 - **Auto-sign contracts** (Contracts page or Settings) accepts every offer that fits.
+- **Contract notifications** can be set to All, Problems only or Off (Contracts page or Settings).
+- **⚡ Auto-assign staff** works out the best placement for everyone, and can keep doing it as you hire and build.
+- **Find what needs attention**: the top-bar chip jumps to the next data center needing servers, the Data Centers page filters and sorts by need, and city name tags glow amber.
+- **🤝 Buy a competitor** for its valuation from the Competitors page. You get its land, running data centers and cash.
 - **Overdraft protection** covers shortfalls with a bank loan, and being away can never cost more than a quarter of your cash.
 - **Opportunity cards** pop up now and then with choices: investors, GPU rentals, press features, bulk deals, gambles and more. Ignore them and nothing bad happens.
 
@@ -62,7 +67,8 @@ The current story mission is always shown at the bottom of the sidebar.
 | Action | Input |
 |---|---|
 | Pan / zoom map | Drag / mouse wheel |
-| Orbit / pan / zoom 3D view | Drag / right-drag / wheel |
+| City: pan / rotate / zoom (PC) | Drag or WASD / right-drag or Q E / wheel |
+| City: pan / rotate / zoom (Mobile) | One finger / two-finger twist / pinch (slide two fingers to tilt) |
 | Stop / resume time | Space |
 | Game speed 1×/2×/4× | 1 / 2 / 3 |
 | World map | M |
@@ -71,9 +77,9 @@ The current story mission is always shown at the bottom of the sidebar.
 
 ## Features
 
-- **Cinematic visuals** — dynamic sky with sun, stars and a day/night cycle (or lock it to day, golden hour or night); image-based reflections on glass and metal; living streets with moving traffic, headlights, street lamps, trees and sidewalks; lit windows at night; glowing facility accent bands and logo plaques; rooftop chillers with steam; aviation lights; construction scaffolding, netting and site trucks; an animated isometric title scene; glowing map markers and pulsing parcel outlines.
+- **Realistic street-level city** — custom WebGL2 renderer with procedural architecture: glass towers with setbacks, concrete offices, brick terraces, apartments, shops with parking, malls, warehouses with loading docks, factories, houses and parks; reflective glass, real-time sun shadows, day/night with lit windows, street lights, moving traffic, and detailed data centers with chillers, generators, construction stages and an X-ray rack view. Resolution adapts automatically on slower devices.
 - **Real interactive map** — MapLibre GL JS with OpenFreeMap / OpenStreetMap vector tiles (dark-themed at runtime), globe projection at world zoom, country boundaries from Natural Earth (world-atlas), smooth fly-to transitions, breadcrumbs, zoom/reset/back controls.
-- **Four zoom levels** — world → country → city → property. Property view is a Three.js scene with the neighborhood, the existing building, demolition (dust, excavator, debris), every construction stage (crane, steel frame, floors, transformers, rooftop chillers, cladding), and the finished facility with X-ray mode showing one rack per installed server with blinking LEDs.
+- **Four zoom levels** — world → country → city → property, the last two in one continuous 3D scene.
 - **Living cities** — every district sits inside a procedurally generated city of ~1,500 buildings: downtown towers rise toward each real city's centre, with mid-rise offices, apartments, brick walk-ups, suburbs, parks and continuous streets. The skyline appears on the map, in the 3D property view (lit windows and aviation lights at night) and in the offline view.
 - **Property system** — ~6,900 procedurally generated parcels across 16 real cities, 10 property types, zoning codes, restrictions, development potential, demolition costs and location-driven prices. Buy individual lots or entire development zones (15% bundle discount), then consolidate zones into single campus sites.
 - **8 data center classes** from $250K modular units to the $500M Mega AI Campus, plus a full custom-building designer.
@@ -99,7 +105,8 @@ src/
                employees, research, competitors, events, progression, ledger, sim (tick + offline)
   save/        IndexedDB / localStorage persistence, validation, export/import
   map/         MapLibre engine, Canvas fallback engine, map controller (levels, layers, markers)
-  three/       Three.js property view, isometric fallback
+  city/        street-level WebGL2 city: renderer, shaders, mesh builder, building models
+  three/       isometric fallback for devices without WebGL2
   ui/          app shell, DOM morphing, components, charts, pages/
   audio/       procedural Web Audio sound effects & music
 styles/main.css
@@ -110,4 +117,4 @@ All prices, rates, timers and costs live in `src/config/economy.ts` and the othe
 
 ## Credits
 
-Map data © OpenStreetMap contributors, tiles by OpenFreeMap / OpenMapTiles. Country boundaries from Natural Earth via world-atlas. 3D by Three.js, charts by Chart.js. Properties, companies and customers are fictional.
+Map data © OpenStreetMap contributors, tiles by OpenFreeMap / OpenMapTiles. Country boundaries from Natural Earth via world-atlas. Charts by Chart.js. Properties, companies and customers are fictional.

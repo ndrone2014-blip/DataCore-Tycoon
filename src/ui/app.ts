@@ -6,25 +6,32 @@ import { advance, advanceFrozen, catchUp, type OfflineReport } from '../systems/
 import { confetti, moneyPop } from './fx';
 import { DECISIONS, resolveDecision } from '../systems/decisions';
 import { saveGame, saveSync } from '../save/save';
-import { on, emit } from '../core/bus';
+import { on, emit, type ToastMsg } from '../core/bus';
 import { morph, registerActions, registerChanges } from './dom';
 import { showToast, refreshModal, closeModal, runConfirm, isModalOpen, openModal } from './components';
 import { updateCharts } from './charts';
 import { icon } from './icons';
 import { playSfx, setAudioSettings, unlockAudio } from '../audio/sound';
 import { MapController } from '../map/controller';
-import { createThreeView, type PropertyViewLike } from '../three/propertyView';
-import { createIsoView } from '../three/isoView';
+import { createIsoView, type PropertyViewLike } from '../three/isoView';
+import { createCityView, type CityPin, type CityView } from '../city/cityView';
+import { isMobile } from '../core/device';
+import { landValue } from '../systems/derive';
+import { parcelState } from '../systems/property';
+import { PROPERTY_TYPE_INFO } from '../world/parcels';
+import { dcNeed } from './pages/shared';
 import { money, gameDate, esc, duration } from '../core/format';
 import { xpForLevel, titleForLevel } from '../config/economy';
 import { PAGES, type PageDef } from './pages';
 import { renderMapPanel } from './pages/mapPanel';
 import { currentStory, missionProgress } from '../systems/progression';
-import { countryById, cityById } from '../config/world';
+import { CITIES, countryById, cityById } from '../config/world';
 import { getParcel } from '../world/parcels';
 import { stopTitleScene } from './titleScene';
 
 export type Result = { ok: boolean; reason?: string } | void | undefined | boolean;
+
+const MOBILE_LABEL: Record<string, string> = { dashboard: 'Home', map: 'Map', datacenters: 'DCs', contracts: 'Contracts' };
 
 export class App {
   s!: GameState;
@@ -32,6 +39,12 @@ export class App {
   page = 'dashboard';
   map: MapController | null = null;
   pv: PropertyViewLike | null = null;
+  city: CityView | null = null;
+  private cityShown: string | null = null;
+  private cityTimer = 0;
+  private sheet: 'peek' | 'half' | 'full' = 'peek';
+  private sheetLevel = '';
+  private dcCursor = 0;
   pvLoading = false;
   show3D = true;
   xray = false;
@@ -58,7 +71,14 @@ export class App {
     root.innerHTML = this.shellHtml();
     this.applySettings();
     this.installActions();
-    on('toast', (t) => showToast(t));
+    on('toast', (t: ToastMsg) => {
+      // contract notifications can be turned off in Settings or on the Contracts page
+      const pref = this.s.settings.contractAlerts ?? 'all';
+      if (t.channel === 'contract' && pref !== 'all') return;
+      if (t.channel === 'contract-problem' && pref === 'off') return;
+      if (t.dcId) { const id = t.dcId; t.onClick = () => { this.ui.dcId = id; this.navigate('datacenters'); }; }
+      showToast(t);
+    });
     on('sfx', (n) => playSfx(n));
     on('world', () => {
       this.d = deriveAll(this.s);
@@ -85,6 +105,8 @@ export class App {
     });
     window.addEventListener('keydown', (e) => this.onKey(e));
     window.addEventListener('pointerdown', () => unlockAudio(), { once: true });
+    window.addEventListener('resize', () => this.applySheet());
+    this.applySheet();
     this.navigate(state.gameHours < 1 && Object.keys(state.facilities).length === 0 ? 'map' : 'dashboard');
     this.loopTimer = window.setInterval(() => this.tick(), 100);
     this.render(true);
@@ -127,7 +149,7 @@ export class App {
       this.popCash = this.s.cash;
       this.lastPop = now;
     }
-    if (now - this.lastRender > 450) {
+    if (now - this.lastRender > (isMobile() ? 800 : 450)) {
       this.lastRender = now;
       this.render();
     }
@@ -158,6 +180,7 @@ export class App {
       <main class="main">
         <section id="map-page" class="map-page hidden">
           <div id="map-container" class="map-container"></div>
+          <div id="city3d" class="city3d"></div>
           <div id="pv-container" class="pv-container"></div>
           <div class="map-ui">
             <div class="crumbs" id="crumbs"></div>
@@ -166,6 +189,7 @@ export class App {
             <div class="map-hover" id="map-hover"></div>
             <div class="map-attrib" id="map-attrib"></div>
           </div>
+          <div class="sheet-handle" id="sheet-handle" data-act="sheetToggle" aria-label="Resize panel"><i></i></div>
           <aside class="map-panel" id="map-panel"></aside>
         </section>
         <section id="page" class="page"></section>
@@ -226,6 +250,7 @@ export class App {
         <div class="tb-stat hide-sm"><label>Valuation</label><b>${money(d.totals.valuation)}</b></div>
         ${s.debt > 0 ? `<div class="tb-stat hide-sm"><label>Debt</label><b class="neg">${money(s.debt)}</b></div>` : ''}
       </div>
+      ${this.alertsHtml()}
       <div class="tb-time">
         <div class="tb-date">${gameDate(Date.UTC(2027, 0, 1, 8), s.gameHours)}</div>
         <div class="speed">
@@ -238,16 +263,41 @@ export class App {
       </div>`;
   }
 
+  /** Data centers still waiting for servers, emptiest first. */
+  needyDCs() {
+    return Object.values(this.s.facilities)
+      .filter((f) => !f.isHQ && dcNeed(f, this.d.fac[f.id]).level !== 'ok')
+      .sort((a, b) => (this.d.fac[a.id]?.slotsUsed ?? 0) / a.slots - (this.d.fac[b.id]?.slotsUsed ?? 0) / b.slots);
+  }
+  unlockableMarkets() {
+    return CITIES.filter((c) => !this.s.unlockedCities.includes(c.id) && this.s.level >= c.unlockLevel && this.s.cash >= c.license);
+  }
+  private alertsHtml(): string {
+    const needy = this.needyDCs().length, markets = this.unlockableMarkets().length;
+    if (!needy && !markets) return '<div class="tb-alerts"></div>';
+    return `<div class="tb-alerts">
+      ${needy ? `<button class="alert-chip warn" data-act="nextDC" title="Jump to the next data center that needs servers">⚠ ${needy} DC${needy > 1 ? 's' : ''} need${needy > 1 ? '' : 's'} servers</button>` : ''}
+      ${markets ? `<button class="alert-chip good" data-act="openMarkets" title="See which cities you can unlock">🔓 ${markets} new ${markets > 1 ? 'cities' : 'city'}</button>` : ''}
+    </div>`;
+  }
+
   private navHtml(): string {
     const s = this.s;
     const badges: Record<string, number> = {
       construction: Object.keys(s.projects).length,
-      contracts: s.contracts.offers.length,
+      contracts: (s.settings.contractAlerts ?? 'all') === 'all' ? s.contracts.offers.length : 0,
+      map: this.unlockableMarkets().length,
+      datacenters: this.needyDCs().length,
       achievements: this.claimableMissions(),
       research: s.research.active ? 0 : 0,
     };
-    return PAGES.map((p) => `<button class="nav-item ${this.page === p.id ? 'active' : ''}" data-act="nav" data-page="${p.id}" title="${p.title}">
-      <span class="nav-ic">${icon(p.icon)}</span><span class="nav-label">${p.title}</span>${badges[p.id] ? `<span class="badge">${badges[p.id]}</span>` : ''}</button>`).join('');
+    const item = (p: PageDef) => `<button class="nav-item ${this.page === p.id ? 'active' : ''}" data-act="nav" data-page="${p.id}" title="${p.title}">
+      <span class="nav-ic">${icon(p.icon)}</span><span class="nav-label">${MOBILE_LABEL[p.id] && isMobile() ? MOBILE_LABEL[p.id] : p.title}</span>${badges[p.id] ? `<span class="badge">${badges[p.id]}</span>` : ''}</button>`;
+    if (!isMobile()) return PAGES.map(item).join('');
+    const main = ['dashboard', 'map', 'datacenters', 'contracts'];
+    const moreBadge = PAGES.filter((p) => !main.includes(p.id)).reduce((n, p) => n + (badges[p.id] ?? 0), 0);
+    return `${main.map((id) => item(PAGES.find((p) => p.id === id)!)).join('')}
+      <button class="nav-item ${main.includes(this.page) ? '' : 'active'}" data-act="moreMenu"><span class="nav-ic">☰</span><span class="nav-label">More</span>${moreBadge ? `<span class="badge">${moreBadge}</span>` : ''}</button>`;
   }
 
   private sideFootHtml(): string {
@@ -299,18 +349,20 @@ export class App {
 
   private mapToolsHtml(): string {
     const prop = this.map?.level === 'property';
+    const street = !!this.map?.cityMode;
     return `
       <button class="icon-btn" data-act="mapZoom" data-v="1" title="Zoom in">${icon('plus')}</button>
       <button class="icon-btn" data-act="mapZoom" data-v="-1" title="Zoom out">${icon('minus')}</button>
       <button class="icon-btn" data-act="mapReset" title="Reset camera">${icon('reset')}</button>
       ${prop ? `<span class="tool-sep"></span>
-      <button class="icon-btn ${this.show3D ? 'on' : ''}" data-act="toggle3D" title="3D property view">${icon('cube')}</button>
+      ${street ? '' : `<button class="icon-btn ${this.show3D ? 'on' : ''}" data-act="toggle3D" title="3D property view">${icon('cube')}</button>`}
       <button class="icon-btn ${this.xray ? 'on' : ''}" data-act="toggleXray" title="X-ray interior (see racks)">${icon('xray')}</button>` : ''}`;
   }
 
   private legendHtml(): string {
     const lvl = this.map?.level;
     if (lvl === 'world' || lvl === 'country') return `<div class="lg"><i class="dot unlocked"></i>Open market</div><div class="lg"><i class="dot locked"></i>Locked market</div><div class="lg"><i class="dot mine"></i>Your facilities</div><div class="lg"><i class="sq comp"></i>Competitor present</div>`;
+    if (this.map?.cityMode) return `<div class="lg"><i class="sq" style="background:${this.s.company.color}"></i>Yours</div><div class="lg"><i class="sq" style="background:#ef4444"></i>Competitor</div><div class="lg"><i class="sq dash"></i>Development zone</div><div class="lg muted">${isMobile() ? 'Tap' : 'Click'} any building to buy it</div>`;
     return `<div class="lg"><i class="sq" style="background:#5b6b86"></i>Available</div><div class="lg"><i class="sq" style="background:${this.s.company.color}"></i>Yours</div><div class="lg"><i class="sq" style="background:#ef4444"></i>Competitor</div><div class="lg"><i class="sq" style="background:#f59e0b"></i>Construction</div><div class="lg"><i class="sq dash"></i>Development zone</div>`;
   }
 
@@ -320,6 +372,29 @@ export class App {
     this.map = new MapController(container, () => this.s, () => this.d);
     (window as any).__map = this.map;
     try {
+      this.city = createCityView({
+        container: document.getElementById('city3d')!,
+        getS: () => this.s,
+        getD: () => this.d,
+        mobile: isMobile,
+        quality: () => Math.min({ low: 0, medium: 1, high: 2 }[this.s.settings.graphics] ?? 1, isMobile() ? 1 : 2),
+        pins: () => this.cityPins(),
+        onPick: (id) => { if (id) this.map?.goProperty(id); else this.map?.deselect(); },
+        onHover: (id) => {
+          const p = id ? getParcel(id) : undefined;
+          let t = '';
+          if (p) { const st = parcelState(this.s, p.id); t = `${p.name} · ${PROPERTY_TYPE_INFO[p.type].label}${st.owner ? '' : ` · ${money(landValue(this.s, p.id))}`}`; }
+          emit('maphover', t);
+        },
+        onExit: () => { const m = this.map; if (m?.countryId) m.goCountry(m.countryId); else m?.goWorld(); },
+      });
+    } catch (err) {
+      console.warn('Street view unavailable, using the map fallback', err);
+      this.city = null;
+    }
+    this.map.cityMode = !!this.city;
+    this.map.streetActive = (id) => !!this.city?.visible && this.cityShown === id;
+    try {
       await this.map.init(this.s.settings.forceFallbackMap);
       this.applySettings();
     } catch (err) {
@@ -328,34 +403,95 @@ export class App {
     this.render();
   }
 
+  /** Name tags floating over the player's own properties in the street view. */
+  private cityPins(): CityPin[] {
+    const m = this.map, s = this.s;
+    if (!m?.cityId) return [];
+    const out: CityPin[] = [];
+    for (const [pid, ps] of Object.entries(s.parcels)) {
+      if (ps.owner !== 'player' || ps.mergedInto) continue;
+      const p = getParcel(pid);
+      if (!p || p.cityId !== m.cityId) continue;
+      const x = (p.rect.x0 + p.rect.x1) / 2, z = (p.rect.y0 + p.rect.y1) / 2;
+      const f = ps.facilityId ? s.facilities[ps.facilityId] : undefined;
+      const pr = ps.projectId ? s.projects[ps.projectId] : undefined;
+      if (f) {
+        const need = dcNeed(f, this.d.fac[f.id]);
+        out.push({ id: pid, x, y: f.floors * 5.5 + 9, z, title: f.name, sub: f.isHQ ? 'Headquarters' : need.level === 'ok' ? `${money(this.d.fac[f.id]?.profitHr ?? 0)}/h` : need.label, cls: !f.isHQ && need.level !== 'ok' ? 'alert' : 'mine' });
+      } else if (pr) {
+        out.push({ id: pid, x, y: 14, z, title: pr.kind === 'build' ? 'Under construction' : 'Demolishing', sub: `${Math.round((pr.doneSeconds / Math.max(1, pr.totalSeconds)) * 100)}%`, cls: 'busy' });
+      } else {
+        out.push({ id: pid, x, y: Math.max(8, p.buildingHeight + 4), z, title: p.name, sub: ps.status === 'existing' ? 'Yours · demolish to build' : 'Yours · ready to build', cls: 'mine' });
+      }
+    }
+    return out;
+  }
+
+  private sheetPx(): number {
+    if (!isMobile() || !window.matchMedia('(orientation: portrait)').matches) return 0;
+    const h = window.innerHeight;
+    return this.sheet === 'peek' ? 104 : this.sheet === 'half' ? h * 0.44 : h * 0.8;
+  }
+  private applySheet() {
+    const px = this.sheetPx();
+    document.documentElement.style.setProperty('--sheet', `${Math.round(px)}px`);
+    this.city?.setBottomInset(this.sheet === 'full' ? 0 : px);
+  }
+
   private async onMapState() {
     const m = this.map;
     if (!m) return;
-    if (m.level === 'property' && m.parcelId && this.show3D) {
-      if (!this.pv && !this.pvLoading) {
-        this.pvLoading = true;
-        const cont = document.getElementById('pv-container')!;
-        let pv: PropertyViewLike | null = null;
-        try {
-          pv = await createThreeView(cont, () => this.s, () => this.d, () => this.s.settings.graphics);
-        } catch (err) {
-          console.warn('Three.js view failed', err);
-          pv = null;
+    // on phones the panel slides up when there's something to read about a lot
+    if (m.level !== this.sheetLevel) {
+      this.sheetLevel = m.level;
+      this.sheet = m.level === 'property' ? 'half' : 'peek';
+      this.applySheet();
+    }
+    const page = document.getElementById('map-page');
+    const street = this.city && m.cityMode && this.page === 'map' && (m.level === 'city' || m.level === 'property') && m.cityId;
+    window.clearTimeout(this.cityTimer);
+    if (street) {
+      const city = this.city!;
+      const finish = () => {
+        const cur = this.map!;
+        if (!cur.cityId || (cur.level !== 'city' && cur.level !== 'property')) return;
+        city.show(cur.cityId);
+        this.cityShown = cur.cityId;
+        page?.classList.add('street');
+        const req = cur.camRequest;
+        cur.camRequest = null;
+        city.setXray(this.xray);
+        city.setZone(cur.zoneId);
+        if (cur.level === 'property' && cur.parcelId) {
+          city.setSelected(cur.parcelId);
+          if (req === 'parcel') city.focusParcel(cur.parcelId);
+        } else {
+          city.setSelected(null);
+          if (req === 'city') city.focusCity();
         }
-        this.pv = pv ?? createIsoView(cont, () => this.s, () => this.d);
-        this.pv.setXray(this.xray);
-        this.pvLoading = false;
-      }
-      if (this.pv && this.map?.level === 'property' && this.map.parcelId) {
-        const id = this.map.parcelId;
+        this.render();
+      };
+      // let the world map fly in first, then hand over to the street view
+      if (city.visible || this.cityShown === m.cityId || this.s.settings.reduceMotion) finish();
+      else this.cityTimer = window.setTimeout(finish, 1250);
+    } else {
+      this.city?.hide();
+      page?.classList.remove('street');
+    }
+    // fallback only when the device has no WebGL2
+    if (!m.cityMode) {
+      if (m.level === 'property' && m.parcelId && this.show3D) {
+        if (!this.pv) {
+          this.pv = createIsoView(document.getElementById('pv-container')!, () => this.s, () => this.d);
+          this.pv.setXray(this.xray);
+        }
+        const id = m.parcelId;
         setTimeout(() => {
           if (this.map?.level === 'property' && this.map.parcelId === id && this.show3D) this.pv?.show(id);
         }, this.s.settings.reduceMotion ? 0 : 900);
-      }
-    } else {
-      this.pv?.hide();
+      } else this.pv?.hide();
+      page?.classList.toggle('prop3d', m.level === 'property' && this.show3D);
     }
-    document.getElementById('map-page')?.classList.toggle('prop3d', m.level === 'property' && this.show3D);
     this.render();
   }
 
@@ -364,7 +500,9 @@ export class App {
     document.getElementById('map-page')!.classList.toggle('hidden', page !== 'map');
     document.getElementById('page')!.classList.toggle('hidden', page === 'map');
     if (page === 'map') {
-      void this.ensureMap().then(() => this.map?.engine?.resize());
+      void this.ensureMap().then(() => { this.map?.engine?.resize(); void this.onMapState(); });
+    } else {
+      this.city?.hide();
     }
     const el = document.getElementById('page');
     if (el) el.scrollTop = 0;
@@ -404,7 +542,26 @@ export class App {
     registerActions({
       nav: (el) => {
         playSfx('nav');
+        if (isModalOpen()) closeModal();
         this.navigate(el.dataset.page!);
+      },
+      moreMenu: () => {
+        playSfx('nav');
+        openModal(() => `<h2>Menu</h2><div class="more-grid">${PAGES.map((p) => `<button class="more-item ${this.page === p.id ? 'on' : ''}" data-act="nav" data-page="${p.id}"><span>${icon(p.icon)}</span><small>${p.title}</small></button>`).join('')}</div><div class="more-mission">${this.sideFootHtml()}</div>`);
+      },
+      sheetToggle: () => {
+        this.sheet = this.sheet === 'peek' ? 'half' : this.sheet === 'half' ? 'full' : 'peek';
+        this.applySheet();
+      },
+      nextDC: () => {
+        const list = this.needyDCs();
+        if (!list.length) return;
+        const f = list[this.dcCursor++ % list.length];
+        this.openParcel(f.parcelId);
+      },
+      openMarkets: () => {
+        this.navigate('map');
+        void this.ensureMap().then(() => { this.map?.goWorld(); this.sheet = 'half'; this.applySheet(); });
       },
       pause: () => {
         this.s.paused = !this.s.paused;
@@ -427,7 +584,10 @@ export class App {
       mapCountry: (el) => this.map?.goCountry(el.dataset.id!),
       mapCity: (el) => this.map?.goCity(el.dataset.id!),
       mapBack: () => this.map?.back(),
-      mapZoom: (el) => this.map?.engine?.zoomBy(Number(el.dataset.v)),
+      mapZoom: (el) => {
+        if (this.city?.visible) this.city.zoomBy(Number(el.dataset.v));
+        else this.map?.engine?.zoomBy(Number(el.dataset.v));
+      },
       mapReset: () => {
         const m = this.map;
         if (!m) return;
@@ -443,6 +603,7 @@ export class App {
       toggleXray: () => {
         this.xray = !this.xray;
         this.pv?.setXray(this.xray);
+        this.city?.setXray(this.xray);
         this.render();
       },
       openParcel: (el) => this.openParcel(el.dataset.id!),

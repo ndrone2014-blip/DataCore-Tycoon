@@ -45,6 +45,7 @@ export const METRICS: Record<string, Metric> = {
     }
     return Math.max(best, ...Object.values(byZone), 0);
   },
+  acquisitions: (s) => s.stats.acquisitions ?? 0,
   leader: (s, d) => (s.competitors.every((c) => c.valuation < d.totals.valuation) ? 1 : 0),
   speedUps: (s) => s.stats.speedUps ?? 0,
   totalRevenue: (s) => s.finance.totalRevenue,
@@ -74,6 +75,7 @@ export interface AchievementDef {
 }
 
 export const ACHIEVEMENTS: AchievementDef[] = [
+  { id: 'takeover', title: 'Hostile Takeover', desc: 'Buy out a competitor.', icon: '🤝', metric: 'acquisitions', target: 1, reward: { cash: 0, xp: 1500 } },
   { id: 'first_property', title: 'First Property', desc: 'Purchase your first lot.', icon: '🏷️', metric: 'properties', target: 1, reward: { cash: 25_000, xp: 100 } },
   { id: 'wrecking_ball', title: 'Wrecking Ball', desc: 'Demolish your first building.', icon: '🧱', metric: 'demolitions', target: 1, reward: { cash: 20_000, xp: 80 } },
   { id: 'first_build', title: 'First Construction', desc: 'Complete your first data center.', icon: '🏗️', metric: 'builds', target: 1, reward: { cash: 100_000, xp: 250 } },

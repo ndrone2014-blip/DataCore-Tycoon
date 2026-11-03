@@ -4,7 +4,6 @@
 export const CDN = {
   maplibreJs: 'https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js',
   maplibreCss: 'https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css',
-  three: 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js',
   chartJs: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js',
   topojson: 'https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js',
   worldAtlas: 'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json',
@@ -75,20 +74,6 @@ export async function fetchJson<T = any>(url: string, timeout = 10000, cacheKey?
   } catch {
     return null;
   }
-}
-
-let threePromise: Promise<any | null> | null = null;
-export function loadThree(): Promise<any | null> {
-  if (!threePromise) {
-    const url = CDN.three;
-    threePromise = withTimeout(
-      // non-literal specifier keeps the bundler from resolving it
-      (new Function('u', 'return import(u)') as (u: string) => Promise<any>)(url).catch(() => null),
-      15000,
-      null,
-    );
-  }
-  return threePromise;
 }
 
 let chartPromise: Promise<any | null> | null = null;

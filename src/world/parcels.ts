@@ -359,6 +359,41 @@ function generate(city: CityDef): CityLayout {
     }
   }
 
+  // ---- Infill (v3): most vacant lots hold a real business, so the district reads as a city, not a
+  // map of plots. Uses its own RNG; ids and all other parcels stay identical for existing saves.
+  const rv = mulberry32(hashString('infill:' + city.id));
+  for (const p of parcels) {
+    if (p.type !== 'empty_lot' || rv() > 0.86) continue;
+    const opts: PropertyType[] = p.zoneId ? ['warehouse', 'industrial', 'warehouse'] : p.area < 900 ? ['retail', 'restaurant', 'retail'] : ['retail', 'office', 'restaurant', 'warehouse', 'office'];
+    const type = opts[Math.floor(rv() * opts.length)];
+    const info = PROPERTY_TYPE_INFO[type];
+    const floors = Math.max(1, Math.round(info.floors[0] + rv() * (info.floors[1] - info.floors[0])));
+    const w = p.rect.x1 - p.rect.x0, h = p.rect.y1 - p.rect.y0;
+    const k = Math.sqrt(info.coverage);
+    const cx = (p.rect.x0 + p.rect.x1) / 2, cy = (p.rect.y0 + p.rect.y1) / 2;
+    p.type = type;
+    p.buildingFloors = floors;
+    p.buildingArea = Math.round(w * h * info.coverage * floors);
+    p.buildingHeight = floors * (type === 'office' ? 3.8 : type === 'warehouse' || type === 'industrial' ? 9 : 4.2);
+    p.footprintPoly = rectPoly(cx - (w * k) / 2, cy - (h * k) / 2, cx + (w * k) / 2, cy + (h * k) / 2);
+    const names = BIZ[type];
+    p.name = `${AREA_NAMES[Math.floor(rv() * AREA_NAMES.length)]} ${names[Math.floor(rv() * names.length)]}`;
+  }
+
+  // Outside development zones, most sheds give way to offices and shops so it feels like a city.
+  for (const p of parcels) {
+    if (p.zoneId || (p.type !== 'warehouse' && p.type !== 'industrial') || rv() > 0.6) continue;
+    const type: PropertyType = p.area > 2600 ? 'office' : rv() < 0.5 ? 'office' : 'retail';
+    const info = PROPERTY_TYPE_INFO[type];
+    const floors = Math.max(1, Math.round(info.floors[0] + rv() * (info.floors[1] - info.floors[0])));
+    p.type = type;
+    p.buildingFloors = floors;
+    p.buildingArea = Math.round(p.area * info.coverage * floors);
+    p.buildingHeight = floors * (type === 'office' ? 3.8 : 4.2);
+    const names = BIZ[type];
+    p.name = `${AREA_NAMES[Math.floor(rv() * AREA_NAMES.length)]} ${names[Math.floor(rv() * names.length)]}`;
+  }
+
   const sw = toLL(-PX - 60, -PY - 60);
   const ne = toLL(totalW + PX + 60, totalH + PY + 60);
   return { city, plate, streets, parcels, zones, sites, bounds: [sw[0], sw[1], ne[0], ne[1]] };

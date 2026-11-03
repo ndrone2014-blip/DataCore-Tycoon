@@ -9,7 +9,8 @@ import { cityById } from '../../config/world';
 import { getParcel } from '../../world/parcels';
 import { autoEquip, install, installQuote, sellEquipment, upgradeQuote, upgradeEquipment, repair, repairQuote, renameFacility, decommission, equipmentUnlocked, unitPrice } from '../../systems/equipment';
 import { landValue } from '../../systems/derive';
-import { capBar } from './shared';
+import { capBar, dcNeed } from './shared';
+import { DEPARTMENTS } from '../../config/content';
 import { researchById } from '../../config/research';
 
 export function renderDataCenters(app: App): string {
@@ -24,9 +25,25 @@ export function renderDataCenters(app: App): string {
     ${stat('Total facility profit/h', money(list.reduce((a, f) => a + d.fac[f.id].profitHr, 0)))}
     ${stat('IT load', power(list.reduce((a, f) => a + d.fac[f.id].itLoad, 0)))}
   </div>
-  <div class="dc-grid mt">${list.map((f) => {
+  ${(() => {
+    const filter = app.ui.dcFilter ?? 'all', city = app.ui.dcCity ?? 'all';
+    const needing = list.filter((f) => dcNeed(f, d.fac[f.id]).level !== 'ok').length;
+    const warned = list.filter((f) => d.fac[f.id].warnings.length).length;
+    const cities = [...new Set(list.map((f) => f.cityId))];
+    const tab = (k: string, label: string) => `<button class="${filter === k ? 'on' : ''}" data-act="dcFilter" data-v="${k}">${label}</button>`;
+    return `<div class="card mt dc-toolbar"><div class="tabs">${tab('all', `All (${list.length})`)}${tab('need', `Needs servers (${needing})`)}${tab('warn', `Warnings (${warned})`)}</div>
+      ${cities.length > 1 ? `<select data-change="dcCity"><option value="all">All cities</option>${cities.map((c) => `<option value="${c}" ${city === c ? 'selected' : ''}>${esc(cityById(c).name)}</option>`).join('')}</select>` : ''}</div>`;
+  })()}
+  <div class="dc-grid mt">${list.filter((f) => {
+    const filter = app.ui.dcFilter ?? 'all', city = app.ui.dcCity ?? 'all';
+    if (city !== 'all' && f.cityId !== city) return false;
+    if (filter === 'need') return dcNeed(f, d.fac[f.id]).level !== 'ok';
+    if (filter === 'warn') return d.fac[f.id].warnings.length > 0;
+    return true;
+  }).sort((a, b) => d.fac[a.id].slotsUsed / a.slots - d.fac[b.id].slotsUsed / b.slots).map((f) => {
     const st = d.fac[f.id];
-    return `<div class="card dc-card" data-act="openDC" data-id="${f.id}">
+    const need = dcNeed(f, st);
+    return `<div class="card dc-card ${need.level !== 'ok' ? 'needs' : ''}" data-act="openDC" data-id="${f.id}">
       <div class="row between"><h3><span class="swatch" style="background:${f.color}"></span>${esc(f.name)}</h3><span class="tag ${st.warnings.length ? 'bad' : 'ok'}">${st.warnings.length ? '⚠ ' + st.warnings.length : 'OK'}</span></div>
       <small class="muted">${blueprintById(f.blueprintId).name}${f.custom ? ' (custom)' : ''} · ${cityById(f.cityId).name}</small>
       <div class="grid3 mini-stats">
@@ -38,6 +55,11 @@ export function renderDataCenters(app: App): string {
       ${capBar(st.itLoad, st.powerCap, 'Power', 'kW')}
       ${capBar(st.itLoad, st.coolingCap, 'Cooling', 'kW')}
       <div class="row between small muted"><span>Condition ${f.condition.toFixed(0)}%</span><span>${s.contracts.active.filter((c) => c.facilityId === f.id).length} contracts</span></div>
+      <div class="row gap mt wrap dc-actions">
+        ${need.level !== 'ok' ? `<span class="tag bad sm">⚠ ${need.label}</span>` : ''}
+        ${st.slotsUsed < f.slots ? btn('⚡ Fill racks', 'autoEquip', { id: f.id, k: 1 }, 'primary sm', s.cash < 15000 ? 'Not enough cash' : undefined) : ''}
+        <button class="btn ghost sm" data-act="openParcel" data-id="${f.parcelId}">📍 Show on map</button>
+      </div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -128,6 +150,11 @@ function renderFacility(app: App, id: string): string {
       ${contracts.map((c) => `<tr><td><b>${esc(c.customer)}</b></td><td>${esc(c.label)}</td><td>${num(c.amount)} ${CAP_LABEL[c.cap].unit}</td><td>${money(c.ratePerHour)}</td><td class="${c.fulfillment < c.sla ? 'neg' : 'pos'}">${pct(c.fulfillment)} <small>(SLA ${pct(c.sla)})</small></td><td>${Math.ceil(c.hoursLeft / 24)}d</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No contracts here yet. Idle capacity earns spot-market rates — sign contracts for better pay.</p>'}
   </div>
+  <div class="card mt">
+    <div class="row between wrap gap"><h3>👥 Staff on site (${s.employees.filter((e) => e.assigned === id).length})</h3>
+      <select data-change="addStaffHere" data-id="${id}"><option value="">＋ Assign someone here…</option>${s.employees.filter((e) => e.assigned !== id).map((e) => `<option value="${e.id}">${DEPARTMENTS[e.dept].icon} ${esc(e.name)} (${'★'.repeat(e.skill)})</option>`).join('')}</select></div>
+    <p class="small muted">${s.employees.filter((e) => e.assigned === id).map((e) => `${DEPARTMENTS[e.dept].icon} ${esc(e.name)}`).join(' · ') || 'Nobody assigned here. Staff at HQ still help every site a little.'}</p>
+  </div>
   <div class="card mt auto-equip">
     <div class="row between wrap gap"><div><h3>⚡ Auto-equip</h3><p class="small muted">Fill free rack slots with a balanced mix of the best servers you've unlocked. Networking, power and cooling are added automatically so nothing overloads.</p></div>
     <div class="row gap wrap">${[0.25, 0.5, 1].map((k) => `<button class="btn ${k === 1 ? 'primary' : 'ghost'}" data-act="autoEquip" data-id="${id}" data-k="${k}" ${st.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled' : ''}>Spend up to ${money(Math.max(0, s.cash) * k)}</button>`).join('')}</div></div>
@@ -180,6 +207,8 @@ export function facilityActions(app: App) {
   return {
     openDC: (el: HTMLElement) => { app.ui.dcId = el.dataset.id; app.render(); document.getElementById('page')!.scrollTop = 0; },
     closeDC: () => { app.ui.dcId = null; app.render(); },
+    dcFilter: (el: HTMLElement) => { app.ui.dcFilter = el.dataset.v; app.render(); },
+    staffHere: (el: HTMLElement) => { app.ui.staffHere = el.dataset.id; app.render(); },
     install: (el: HTMLElement) => {
       if (!el.dataset.id) return app.run(() => ({ ok: false, reason: 'Build a data center first' }));
       app.run(() => install(app.s, el.dataset.id!, el.dataset.eq!, Number(el.dataset.n ?? 1)));
@@ -213,6 +242,11 @@ export function facilityActions(app: App) {
 export function facilityChanges(app: App) {
   return {
     renameVal: (el: HTMLElement) => { app.ui.renameVal = (el as HTMLInputElement).value; },
+    dcCity: (el: HTMLElement) => { app.ui.dcCity = (el as HTMLSelectElement).value; app.render(); },
+    addStaffHere: (el: HTMLElement) => {
+      const emp = app.s.employees.find((x) => x.id === (el as HTMLSelectElement).value);
+      if (emp) { emp.assigned = el.dataset.id!; app.d = app.d; app.run(() => undefined); }
+    },
     eqFacility: (el: HTMLElement) => { app.ui.eqFacility = (el as HTMLSelectElement).value; app.render(); },
     autoRepair: (el: HTMLElement) => {
       const f = app.s.facilities[el.dataset.id!];

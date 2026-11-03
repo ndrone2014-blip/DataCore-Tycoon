@@ -44,6 +44,12 @@ export class MapController {
   private markers = new Map<string, { h: MarkerHandle; cityId?: string }>();
   private lastZoomBand = '';
   private refreshPending = false;
+  /** True when the WebGL street-level view handles city and property levels. */
+  cityMode = false;
+  /** Street view already on screen for this city: no need to move the map underneath it. */
+  streetActive: (cityId: string) => boolean = () => false;
+  /** Camera move the street view should perform on the next state change. */
+  camRequest: 'city' | 'parcel' | null = null;
 
   constructor(private container: HTMLElement, private getS: () => GameState, private getD: () => Derived) {}
 
@@ -96,7 +102,7 @@ export class MapController {
     engine.setCountries(fc);
     // static surrounding cities (thousands of decorative buildings)
     const ground: any[] = [], parks: any[] = [], skyB: any[] = [];
-    for (const cs of allCityscapes()) {
+    for (const cs of this.cityMode ? [] : allCityscapes()) {
       ground.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [cs.ground] } });
       for (const p of cs.parks) parks.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [p.poly] } });
       for (const b of cs.buildings) skyB.push({ type: 'Feature', properties: { id: b.id, height: b.height, base: 0, color: b.color, kind: b.kind, sky: true, seed: b.seed }, geometry: { type: 'Polygon', coordinates: [b.poly] } });
@@ -147,7 +153,8 @@ export class MapController {
     this.parcelId = this.zoneId = null;
     this.engine?.setHighlightCountry(null);
     this.engine?.setSelectedParcel(null);
-    this.engine?.flyTo({ center: c.district, zoom: this.engine.kind === 'canvas' ? 15.4 : 14.6, pitch: 45, bearing: -15, duration: 2600 });
+    this.camRequest = 'city';
+    if (!this.streetActive(id)) this.engine?.flyTo({ center: c.district, zoom: this.engine.kind === 'canvas' ? 15.4 : 14.6, pitch: 45, bearing: -15, duration: this.cityMode ? 1500 : 2600 });
     this.changed();
   }
 
@@ -162,7 +169,8 @@ export class MapController {
     this.parcelId = parcelId;
     this.zoneId = p.zoneId ?? null;
     this.engine?.setSelectedParcel(parcelId);
-    this.engine?.flyTo({ center: p.center, zoom: (p.area > 12000 ? 16.6 : 17.4) + (this.engine.kind === 'canvas' ? 0.6 : 0), pitch: 58, bearing: -20, duration: 1400 });
+    this.camRequest = 'parcel';
+    if (!this.streetActive(p.cityId)) this.engine?.flyTo({ center: p.center, zoom: (p.area > 12000 ? 16.6 : 17.4) + (this.engine.kind === 'canvas' ? 0.6 : 0), pitch: 58, bearing: -20, duration: 1400 });
     this.changed();
   }
 
@@ -205,8 +213,17 @@ export class MapController {
     }
   }
 
+  /** Tap on open ground in the street view: deselect and stay where the camera is. */
+  deselect() {
+    if (this.level !== 'property') return;
+    this.level = 'city';
+    this.parcelId = null;
+    this.changed();
+  }
+
   private onMove() {
     const z = this.engine!.getZoom();
+    if (this.cityMode && (this.level === 'city' || this.level === 'property')) return;
     // keep breadcrumb in sync when the player zooms manually
     if (this.level === 'city' && z < 9.5) {
       this.level = this.countryId ? 'country' : 'world';
@@ -247,6 +264,7 @@ export class MapController {
   }
 
   private buildCityData(): CityData {
+    if (this.cityMode) return { plates: empty(), streets: empty(), parcels: empty(), buildings: empty(), zones: empty() };
     const s = this.getS();
     const compById = new Map(s.competitors.map((c) => [c.id, c]));
     const compSite = new Map<string, { progress: number; total: number; stage: string; bp: string; color: string }>();

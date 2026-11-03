@@ -68,17 +68,17 @@ export function getCityscape(cityId: string): Cityscape {
       const along = ((cx - midX) * dirX + (cy - midY) * dirY) / 1500;
       const ringDist = Math.max(Math.abs(i - BX / 2) - BX / 2 - inner, Math.abs(j - BY / 2) - BY / 2 - inner);
       const intensity = Math.max(0, Math.min(1, 0.42 + along * 0.45 + (downtownDist < 6000 ? 0.22 : 0) - ringDist * 0.03 + (r() - 0.5) * 0.3));
-      if (r() < 0.09) {
+      if (r() < 0.07) {
         parks.push({ rect: { x0: bx0, y0: by0, x1: bx1, y1: by1 }, poly: rectPoly(bx0, by0, bx1, by1) });
         continue;
       }
       // subdivide the block
-      const cols = intensity > 0.7 ? 2 : intensity > 0.35 ? 3 : 4;
-      const rows = intensity > 0.7 ? 1 : 2;
+      const cols = intensity > 0.7 ? 3 : intensity > 0.35 ? 4 : 5;
+      const rows = intensity > 0.7 ? 2 : 2;
       const cw = (bx1 - bx0) / cols, rh = (by1 - by0) / rows;
       for (let a = 0; a < cols; a++) {
         for (let b = 0; b < rows; b++) {
-          if (r() < 0.08) continue;
+          if (r() < 0.03) continue;
           const pad = 3 + r() * 4;
           const x0 = bx0 + a * cw + pad, y0 = by0 + b * rh + pad, x1 = bx0 + (a + 1) * cw - pad, y1 = by0 + (b + 1) * rh - pad;
           let kind: SkyKind;

@@ -1,3 +1,5 @@
+import { money } from '../core/format';
+import { CITIES } from '../config/world';
 // Money movement, experience and activity log. All cash changes go through here
 // so every dollar shows up in reports and transaction history.
 
@@ -81,6 +83,9 @@ export function addXp(s: GameState, amount: number, reason?: string) {
     const newTitle = titleForLevel(s.level);
     log(s, `Company reached level ${s.level} — ${newTitle}`, 'good');
     toast({ title: `Level ${s.level}!`, body: `${newTitle}. New buildings, equipment or regions may be unlocked.`, kind: 'level', icon: '⭐' });
+    for (const c of CITIES) {
+      if (c.unlockLevel === s.level && !s.unlockedCities.includes(c.id)) toast({ title: `New market: ${c.name}`, body: `You can now enter ${c.name}${c.license ? ` for ${money(c.license)}` : ''}. Open the World Map and press Unlock.`, kind: 'good', icon: '🔓' });
+    }
   }
   if (leveled) {
     sfx('levelup');

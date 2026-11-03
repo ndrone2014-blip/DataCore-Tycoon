@@ -1,3 +1,8 @@
+import { newGame as newGameV2, advance as advanceV2 } from '../src/systems/sim';
+import { deriveAll as der } from '../src/systems/derive';
+import { acquireCompetitor, acquisitionQuote } from '../src/systems/competitors';
+import { autoEquip as ae } from '../src/systems/equipment';
+import { autoAssignStaff, refreshCandidates as rc, hire as hi } from '../src/systems/employees';
 import { newGame, step, catchUp } from '../src/systems/sim';
 import { buyParcel, startDemolition, canBuy } from '../src/systems/property';
 import { startBuild, quoteBuild, speedUp } from '../src/systems/construction';
@@ -117,4 +122,68 @@ import { DECISIONS, resolveDecision } from '../src/systems/decisions';
   g.settings.autoLoan = false;
   catchUp(g);
   assert(g.cash >= 749_999, 'offline losses capped at 25%');
+}
+
+// ---- v2 feedback fixes ----
+{
+  const g = newGameV2({ name: 'T', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  advanceV2(g, 3);
+  const rival = g.competitors[0];
+  const ownedLots = Object.values(g.parcels).filter((p) => p.owner === rival.id).length;
+  const running = rival.sites.filter((x) => x.stage === 'operational').length;
+  const quote = acquisitionQuote(g, rival.id);
+  if (quote.ok) throw new Error('should not be able to afford a rival at the start');
+  g.cash = quote.price + 1000;
+  const before = g.cash;
+  const r = acquireCompetitor(g, rival.id);
+  if (!r.ok) throw new Error('acquisition failed: ' + r.reason);
+  if (g.competitors.some((c) => c.id === rival.id)) throw new Error('rival should be gone');
+  if (Object.values(g.parcels).some((p) => p.owner === rival.id)) throw new Error('rival parcels left behind');
+  if (Object.values(g.parcels).filter((p) => p.owner === 'player').length < ownedLots) throw new Error('parcels not transferred');
+  const newDcs = Object.values(g.facilities).filter((f) => f.name.includes(rival.name));
+  if (newDcs.length !== running) throw new Error('facilities not converted');
+  if (newDcs.some((f) => !Object.keys(f.equipment).length)) throw new Error('acquired facility is empty');
+  if (Math.abs(g.cash - (before - quote.price + quote.cashAcquired)) > 1) throw new Error('acquisition cash wrong');
+  const d0 = der(g);
+  for (const f of newDcs) { const st = d0.fac[f.id]; if (st.itLoad > st.powerCap * 1.01) throw new Error('acquired facility overloaded'); }
+  for (let i = 0; i < 40; i++) advanceV2(g, 1); // sim must survive with fewer rivals
+  console.log('ok   buying a competitor transfers land, data centers and cash');
+  while (g.competitors.length) { const c = g.competitors[0]; g.cash = c.valuation + 1e7; if (!acquireCompetitor(g, c.id).ok) throw new Error('could not buy ' + c.name); }
+  for (let i = 0; i < 40; i++) advanceV2(g, 1);
+  console.log('ok   game keeps running with no rivals left');
+
+  // auto-equip must spend small budgets usefully, explain failures and never overload
+  const h = newGameV2({ name: 'U', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const fid = 'dcZ';
+  const pid = h.company.startParcel!;
+  h.parcels[pid] = { owner: 'player', status: 'facility', facilityId: fid };
+  h.facilities[fid] = { id: fid, parcelId: pid, cityId: 'nova', name: 'Z', blueprintId: 'small_ent', slots: 36, bays: 6, basePower: 200, baseCooling: 180, floors: 2, style: 'concrete', color: '#fff', footprint: 0.5, equipment: {}, condition: 100, builtAt: 0, buildCost: 1, shellValue: 1, equipmentSpent: 0, revenueTotal: 0, profitTotal: 0 };
+  h.cash = 200_000;
+  const small = ae(h, fid, 200_000 * 0.25);
+  if (!small.ok || !small.count) throw new Error('25% of a small balance should still buy something: ' + small.reason);
+  h.cash = 1000;
+  const broke = ae(h, fid, 250);
+  if (broke.ok || !broke.reason || /Nothing more fits/.test(broke.reason) === false && !/budget|capacity|slots/i.test(broke.reason)) throw new Error('should explain why: ' + broke.reason);
+  h.cash = 5e9; h.level = 60;
+  const rich = ae(h, fid, 5e9);
+  const st = der(h).fac[fid];
+  if (!rich.ok) throw new Error('rich auto-equip failed: ' + rich.reason);
+  if (st.slotsUsed < 30) throw new Error(`rich auto-equip left racks empty (${st.slotsUsed}/36)`);
+  if (st.itLoad > st.powerCap + 1e-6 || st.itLoad > st.coolingCap + 1e-6) throw new Error('auto-equip overloaded the site');
+  console.log('ok   auto-equip works at any budget and explains failures', st.slotsUsed + '/36');
+
+  // auto-assign: one site gets its staff on site, company-wide departments stay at HQ
+  h.company.hqTier = 4;
+  for (const dept of ['it', 'ops', 'finance', 'research', 'cooling'] as const) {
+    rc(h);
+    h.candidates[0].dept = dept;
+    hi(h, h.candidates[0].id);
+  }
+  autoAssignStaff(h);
+  for (const e of h.employees) {
+    const site = ['it', 'ops', 'cooling'].includes(e.dept);
+    if (site && e.assigned !== fid) throw new Error(`${e.dept} should be on site with one facility`);
+    if (!site && e.assigned !== 'hq') throw new Error(`${e.dept} should be at HQ`);
+  }
+  console.log('ok   auto-assign places staff sensibly');
 }
