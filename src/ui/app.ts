@@ -17,7 +17,7 @@ import { createIsoView, type PropertyViewLike } from '../three/isoView';
 import { createCityView, type CityPin, type CityView } from '../city/cityView';
 import { isMobile } from '../core/device';
 import { landValue } from '../systems/derive';
-import { parcelState } from '../systems/property';
+import { licenseFee, parcelState } from '../systems/property';
 import { PROPERTY_TYPE_INFO } from '../world/parcels';
 import { dcNeed } from './pages/shared';
 import { money, gameDate, esc, duration } from '../core/format';
@@ -51,6 +51,7 @@ export class App {
   ui: Record<string, any> = { financeTab: 'hourly', dcId: null, reCity: 'all', reType: 'all', reSort: 'price', contractsTab: 'offers', compId: null, achTab: 'missions', eqFacility: null };
   private lastTick = performance.now();
   private lastRender = 0;
+  private renderCost = 0;
   private lastSave = Date.now();
   private saving = false;
   private savedAt = 0;
@@ -149,9 +150,13 @@ export class App {
       this.popCash = this.s.cash;
       this.lastPop = now;
     }
-    if (now - this.lastRender > (isMobile() ? 800 : 450)) {
+    // Slow pages refresh less often so the UI never eats more than ~6% of the main thread.
+    const base = isMobile() ? 800 : 450;
+    if (!document.hidden && now - this.lastRender > Math.min(2000, Math.max(base, this.renderCost * 16))) {
       this.lastRender = now;
+      const t0 = performance.now();
       this.render();
+      this.renderCost += (performance.now() - t0 - this.renderCost) * 0.3;
     }
     if (Date.now() - this.lastSave > this.s.settings.autosaveSeconds * 1000) void this.save(true);
   }
@@ -270,7 +275,7 @@ export class App {
       .sort((a, b) => (this.d.fac[a.id]?.slotsUsed ?? 0) / a.slots - (this.d.fac[b.id]?.slotsUsed ?? 0) / b.slots);
   }
   unlockableMarkets() {
-    return CITIES.filter((c) => !this.s.unlockedCities.includes(c.id) && this.s.level >= c.unlockLevel && this.s.cash >= c.license);
+    return CITIES.filter((c) => !this.s.unlockedCities.includes(c.id) && this.s.level >= c.unlockLevel && this.s.cash >= licenseFee(this.s, c.id));
   }
   private alertsHtml(): string {
     const needy = this.needyDCs().length, markets = this.unlockableMarkets().length;
@@ -610,6 +615,7 @@ export class App {
       decisionChoose: (el) => this.run(() => resolveDecision(this.s, Number(el.dataset.i))),
       decisionDismiss: () => { this.s.decision = undefined; this.render(); },
       openCity: (el) => this.openCity(el.dataset.id!),
+      openNews: () => { this.ui.indTab = 'news'; this.navigate('industry'); },
     });
     for (const p of PAGES) if (p.actions) registerActions(p.actions(this));
     for (const p of PAGES) if (p.changes) registerChanges(p.changes(this));

@@ -6,7 +6,7 @@ import { newId } from '../core/state';
 import type { Derived } from './derive';
 import { ECONOMY } from '../config/economy';
 import { rand, randRange, pick } from '../core/rng';
-import { receive, spend, addXp, log, canAfford } from './ledger';
+import { receive, spend, addXp, log, canAfford, pushNews } from './ledger';
 import { toast, sfx, emit } from '../core/bus';
 import { money } from '../core/format';
 import { researchById } from '../config/research';
@@ -130,6 +130,43 @@ export const DECISIONS: DecisionDef[] = [
     choices: (_s, x) => [
       { label: `Hire them (${money(x.cost)})`, hint: '+50% construction speed for 48h', cost: x.cost, apply: (s) => { spend(s, x.cost, 'Construction', 'Elite construction crew'); buff(s, 'constructionSpeed', 0.5, 48, 'Elite crew'); return 'The elite crew is on site!'; } },
       { label: 'No thanks', hint: 'No change', apply: () => 'You stuck with your regular crews.' },
+    ],
+  },
+  // ---- bigger calls with consequences that last ----
+  {
+    id: 'breach', icon: '🔓', title: 'Security incident',
+    text: (_s, x) => `Engineers found an intrusion in a customer portal. Going public and fixing it properly costs ${money(x.cost)} and some face. Quietly patching it is free, unless someone finds out.`,
+    setup: (_s, d) => (d.totals.facilities >= 2 ? { cost: Math.round(scale(d) * 0.2 / 1000) * 1000 } : null),
+    choices: (_s, x) => [
+      { label: `Disclose and fix (${money(x.cost)})`, hint: '−2 reputation now, no later risk', cost: x.cost, apply: (s) => { spend(s, x.cost, 'Security', 'Incident response'); s.company.reputation = Math.max(0, s.company.reputation - 2); return 'Customers respected the honesty.'; } },
+      { label: 'Patch it quietly', hint: '35% chance it leaks: −15 reputation', apply: (s) => { if (rand() < 0.35) { s.company.reputation = Math.max(0, s.company.reputation - 15); pushNews(s, `${s.company.name} hid a security breach, report claims`, undefined, 'bad', 'Company'); return 'It leaked. The press is brutal.'; } return 'Nobody noticed. This time.'; } },
+    ],
+  },
+  {
+    id: 'anchor', icon: '⚓', title: 'Anchor customer deal',
+    text: (_s, x) => `A giant customer offers ${money(x.cash)} up front for a long-term volume discount. It brings other customers too, but cuts your rates for 40 days.`,
+    setup: (_s, d) => (d.totals.facilities >= 2 ? { cash: Math.round(scale(d) * 1.2 / 1000) * 1000 } : null),
+    choices: (_s, x) => [
+      { label: `Sign (+${money(x.cash)})`, hint: '−6% contract rates, +25% offers for 40 days', apply: (s) => { receive(s, x.cash, 'Contract Bonus', 'Anchor customer prepayment'); buff(s, 'contractRate', -0.06, 960, 'Anchor discount'); buff(s, 'offerRate', 0.25, 960, 'Anchor customer references'); return `${money(x.cash)} in the bank and a big logo for the website.`; } },
+      { label: 'Keep your pricing', hint: 'No change', apply: () => 'You held firm on price.' },
+    ],
+  },
+  {
+    id: 'green_bond', icon: '🌱', title: 'Green energy bond',
+    text: (_s, x) => `Investors will fund on-site renewables if you commit ${money(x.cost)}. Your power bills fall for a long time, and so does your cash.`,
+    setup: (_s, d) => (d.totals.facilities >= 2 ? { cost: Math.round(scale(d) * 0.5 / 1000) * 1000 } : null),
+    choices: (_s, x) => [
+      { label: `Invest (${money(x.cost)})`, hint: '−8% electricity for 60 days, +3 reputation', cost: x.cost, apply: (s) => { spend(s, x.cost, 'Energy', 'Green energy bond'); buff(s, 'electricityCost', 0.08, 1440, 'Green energy bond'); s.company.reputation = Math.min(100, s.company.reputation + 3); return 'Solar farms are going up.'; } },
+      { label: 'Not now', hint: 'No change', apply: () => 'You stayed on grid power.' },
+    ],
+  },
+  {
+    id: 'pay_review', icon: '💬', title: 'Staff pay review',
+    text: () => 'Your people are asking for a raise. Agreeing costs more every hour. Refusing saves money and hurts morale.',
+    setup: (s) => (s.employees.length >= 4 ? {} : null),
+    choices: () => [
+      { label: 'Give a 6% raise', hint: 'Permanent salary rise, +15 performance for all', apply: (s) => { for (const e of s.employees) { e.salary *= 1.06; e.perf = Math.min(100, e.perf + 15); } return 'Morale is sky-high.'; } },
+      { label: 'Hold the line', hint: '−12 performance for all', apply: (s) => { for (const e of s.employees) e.perf = Math.max(0, e.perf - 12); return 'The mood in the office has soured.'; } },
     ],
   },
 ];

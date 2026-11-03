@@ -46,6 +46,12 @@ export const METRICS: Record<string, Metric> = {
     return Math.max(best, ...Object.values(byZone), 0);
   },
   acquisitions: (s) => s.stats.acquisitions ?? 0,
+  sitesBought: (s) => s.stats.sitesBought ?? 0,
+  fiberOnline: (s) => s.stats.fiberOnline ?? 0,
+  reputation: (s) => s.company.reputation,
+  citySpecs: (s) => Object.keys(s.citySpec ?? {}).length,
+  policiesSet: (s) => Object.keys(s.policies ?? {}).length,
+  supplyDeals: (s) => s.stats.supplyDeals ?? 0,
   leader: (s, d) => (s.competitors.every((c) => c.valuation < d.totals.valuation) ? 1 : 0),
   speedUps: (s) => s.stats.speedUps ?? 0,
   totalRevenue: (s) => s.finance.totalRevenue,
@@ -75,6 +81,13 @@ export interface AchievementDef {
 }
 
 export const ACHIEVEMENTS: AchievementDef[] = [
+  { id: 'first_fiber', title: 'Lit Fiber', desc: 'Bring your first fiber route online.', icon: '🌐', metric: 'fiberOnline', target: 1, reward: { cash: 0, xp: 500 } },
+  { id: 'global_backbone', title: 'Global Backbone', desc: 'Run 10 fiber routes.', icon: '🌍', metric: 'fiberOnline', target: 10, reward: { cash: 0, xp: 4000 } },
+  { id: 'trusted', title: 'Trusted Provider', desc: 'Reach a reputation of 85.', icon: '🏅', metric: 'reputation', target: 85, reward: { cash: 0, xp: 1500 } },
+  { id: 'specialist', title: 'Specialist', desc: 'Give 3 cities a regional focus.', icon: '🎯', metric: 'citySpecs', target: 3, reward: { cash: 0, xp: 1000 } },
+  { id: 'boardroom', title: 'Boardroom Strategist', desc: 'Set all four company policies.', icon: '🧭', metric: 'policiesSet', target: 4, reward: { cash: 0, xp: 1000 } },
+  { id: 'poacher', title: 'Asset Stripper', desc: 'Buy a data center from a rival.', icon: '🏷️', metric: 'sitesBought', target: 1, reward: { cash: 0, xp: 800 } },
+  { id: 'preferred', title: 'Preferred Customer', desc: 'Sign a long-term supplier agreement.', icon: '📦', metric: 'supplyDeals', target: 1, reward: { cash: 0, xp: 400 } },
   { id: 'takeover', title: 'Hostile Takeover', desc: 'Buy out a competitor.', icon: '🤝', metric: 'acquisitions', target: 1, reward: { cash: 0, xp: 1500 } },
   { id: 'first_property', title: 'First Property', desc: 'Purchase your first lot.', icon: '🏷️', metric: 'properties', target: 1, reward: { cash: 25_000, xp: 100 } },
   { id: 'wrecking_ball', title: 'Wrecking Ball', desc: 'Demolish your first building.', icon: '🧱', metric: 'demolitions', target: 1, reward: { cash: 20_000, xp: 80 } },

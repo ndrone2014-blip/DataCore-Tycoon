@@ -4,6 +4,8 @@
 import { SAVE_VERSION, defaultSettings, emptyReport, type GameState } from '../core/state';
 import { CITIES } from '../config/world';
 import { ECONOMY } from '../config/economy';
+import { ensureExpansion } from '../systems/expansionState';
+import { fiberLink } from '../config/expansion';
 
 const DB_NAME = 'ai-datacenter-empire';
 const STORE = 'saves';
@@ -176,6 +178,9 @@ export function validate(raw: any): LoadResult {
     if (!Array.isArray(c.history)) c.history = [];
     if (!isNum(c.cash)) c.cash = 1_000_000;
   }
+  ensureExpansion(s);
+  s.fiber.routes = s.fiber.routes.filter((r) => r && fiberLink(r.link) && isNum(r.doneAt) && isNum(r.tier));
+  for (const fac of Object.values(s.facilities)) if (fac.orders && !Array.isArray(fac.orders)) fac.orders = undefined;
   s.version = SAVE_VERSION;
   return { state: s, repaired };
 }

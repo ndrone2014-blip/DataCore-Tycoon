@@ -154,6 +154,7 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
   }
   const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0) / 4294967296; };
 
+  let fiber: FC = { type: 'FeatureCollection', features: [] };
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     lighting = getLighting(tod as any);
@@ -235,6 +236,22 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     v.addColorStop(1, 'rgba(0,0,0,0.45)');
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
+    // fiber routes
+    if (fiber.features.length && zoom < 10) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      for (const f of fiber.features) {
+        const pr = f.properties;
+        ctx.strokeStyle = pr.color;
+        ctx.globalAlpha = pr.live ? (pr.mine ? 0.95 : 0.4) : 0.35;
+        ctx.lineWidth = pr.width;
+        ctx.setLineDash(pr.live ? [] : [6, 5]);
+        ctx.beginPath();
+        f.geometry.coordinates.forEach((q: number[], n: number) => { const [x, y] = toScreen(q[0], q[1]); if (n) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   // quick reject for features belonging to other cities (cheap lng/lat test before projecting)
@@ -741,6 +758,10 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
     zoomBy: (d) => flyTo({ center, zoom: zoom + d, duration: 350 }),
     setCountries: (fc) => {
       countries = fc;
+      dirty = true;
+    },
+    setFiber: (fc) => {
+      fiber = fc;
       dirty = true;
     },
     setHighlightCountry: (iso) => {

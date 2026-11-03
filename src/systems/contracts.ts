@@ -12,6 +12,8 @@ import { receive, spend, log, addXp, stat, pushTx } from './ledger';
 import { toast, sfx, emit } from '../core/bus';
 import { money, num } from '../core/format';
 import { cityById } from '../config/world';
+import { cityMods, specMods } from './regulation';
+import { REP_REQ, repOfferMult } from './reputation';
 
 const MIN_SIZE: Record<CapType, number> = { cpu: 128, gpu: 8, storage: 480 };
 const STEP: Record<CapType, number> = { cpu: 64, gpu: 8, storage: 480 };
@@ -22,8 +24,16 @@ export function contractRateMult(s: GameState, der: Derived): number {
 
 export function generateOffer(s: GameState, der: Derived): Contract {
   const boom = s.events.some((e) => e.defId === 'ai_boom');
-  const types = (Object.keys(CUSTOMER_TYPES) as CustomerType[]).filter((t) => s.level >= CUSTOMER_TYPES[t].level);
-  const weights = types.map((t) => (boom && (t === 'startup' || t === 'tech') ? 2.5 : 1) * (t === 'government' || t === 'tech' ? 0.6 : 1));
+  // Customers buy capacity in a specific market. Mostly where you operate, sometimes elsewhere (expansion bait).
+  const myCities = [...new Set(Object.values(s.facilities).filter((f) => !f.isHQ).map((f) => f.cityId))];
+  const cityPref = myCities.length && rand() < 0.75 ? pick(myCities) : pick(s.unlockedCities);
+  const mods = cityMods(s, cityPref);
+  const spec = specMods(s, cityPref, der.effects);
+  // big customers look at your reputation before they'll talk to you
+  const allTypes = (Object.keys(CUSTOMER_TYPES) as CustomerType[]).filter((t) => s.level >= CUSTOMER_TYPES[t].level);
+  const trusted = allTypes.filter((t) => s.company.reputation >= (REP_REQ[t] ?? 0));
+  const types = trusted.length ? trusted : allTypes;
+  const weights = types.map((t) => (boom && (t === 'startup' || t === 'tech') ? 2.5 : 1) * (t === 'government' || t === 'tech' ? 0.6 : 1) * (t === 'government' ? mods.govDemand : 1) * (spec.draws.includes(t) ? 1.7 : 1));
   let r = rand() * weights.reduce((a, b) => a + b, 0);
   let ctype = types[0];
   for (let i = 0; i < types.length; i++) {
@@ -31,9 +41,6 @@ export function generateOffer(s: GameState, der: Derived): Contract {
     if (r <= 0) { ctype = types[i]; break; }
   }
   const def = CUSTOMER_TYPES[ctype];
-  // Customers buy capacity in a specific market. Mostly where you operate, sometimes elsewhere (expansion bait).
-  const myCities = [...new Set(Object.values(s.facilities).filter((f) => !f.isHQ).map((f) => f.cityId))];
-  const cityPref = myCities.length && rand() < 0.75 ? pick(myCities) : pick(s.unlockedCities);
   const cityCap = (c: CapType) => Object.values(s.facilities).filter((f) => f.cityId === cityPref).reduce((a, f) => a + (der.fac[f.id]?.raw[c] ?? 0), 0);
   const owned = def.caps.filter((c) => cityCap(c) > 0);
   const cap: CapType = owned.length && rand() < 0.75 ? pick(owned) : pick(def.caps);
@@ -48,7 +55,9 @@ export function generateOffer(s: GameState, der: Derived): Contract {
   const days = Math.round(randRange(def.days[0], def.days[1]) * (longTerm ? 1.5 : 1));
   // contract prices follow the local market (oversupplied cities pay less)
   const marketFactor = 0.35 + 0.65 * Math.min(1.2, price);
-  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
+  const capFx = eff(der.effects, cap === 'gpu' ? 'gpuRate' : cap === 'cpu' ? 'cpuRate' : 'storageRate');
+  const localFx = 1 + capFx + spec.rates[cap] + spec.contractRate + (der.net.city[cityPref]?.contractBonus ?? 0);
+  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * localFx * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
   const lifetime = randRange(ECONOMY.offerLifetimeHours[0], ECONOMY.offerLifetimeHours[1]);
   return {
     id: newId(s, 'ct'),
@@ -56,7 +65,7 @@ export function generateOffer(s: GameState, der: Derived): Contract {
     ctype, label, cap, amount,
     ratePerHour: Math.round(rate * 100) / 100,
     hours: days * 24, hoursLeft: days * 24,
-    sla: def.sla, security: def.security,
+    sla: def.sla, security: Math.max(def.security, mods.privacyTier),
     bonus: longTerm || days > 30 ? Math.round(rate * randRange(8, 20)) : 0,
     expiresAt: s.gameHours + lifetime,
     fulfillment: 0, earned: 0, breachHours: 0, status: 'offer', cityPref,
@@ -143,7 +152,7 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
       c.offers.push(generateOffer(s, der));
       emit('offer');
     }
-    const speed = 1 + eff(der.effects, 'offerRate') + deptBonus(s, 'sales');
+    const speed = Math.max(0.3, (1 + eff(der.effects, 'offerRate') + deptBonus(s, 'sales')) * repOfferMult(s.company.reputation));
     c.nextOfferAt = s.gameHours + randRange(ECONOMY.offerIntervalHours[0], ECONOMY.offerIntervalHours[1]) / speed;
   }
   // auto-sign: hand offers straight to the facility with the most room

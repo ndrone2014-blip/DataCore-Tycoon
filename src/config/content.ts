@@ -62,7 +62,7 @@ export interface EventDef {
   title: string;
   desc: string;
   hours: [number, number];
-  scope: 'city' | 'global';
+  scope: 'city' | 'global' | 'region' | 'country';
   good: boolean;
   weight: number;
 }
@@ -76,6 +76,18 @@ export const EVENT_DEFS: EventDef[] = [
   { id: 'tax_break', title: 'Tax Incentive', desc: 'Construction costs −20% in {city}.', hours: [48, 96], scope: 'city', good: true, weight: 2 },
   { id: 'energy_spike', title: 'Energy Price Spike', desc: 'Electricity +30% in {city}.', hours: [24, 48], scope: 'city', good: false, weight: 1 },
   { id: 'demand_surge', title: 'Cloud Demand Surge', desc: 'Spot prices +30% in {city}.', hours: [36, 96], scope: 'city', good: true, weight: 3 },
+  // ---- industry-wide events: rivals feel these too ----
+  { id: 'recession', title: 'Economic Recession', desc: 'Compute demand −18% in {place}. Every company in the region earns less.', hours: [96, 220], scope: 'region', good: false, weight: 1.2 },
+  { id: 'cloud_surge', title: 'Enterprise Cloud Migration', desc: 'CPU and storage spot prices +25% worldwide.', hours: [48, 120], scope: 'global', good: true, weight: 2 },
+  { id: 'chip_breakthrough', title: 'Chip Breakthrough', desc: 'Older servers get cheaper: server prices −10% and a vendor ships new hardware.', hours: [48, 96], scope: 'global', good: true, weight: 1.5 },
+  { id: 'supply_crunch', title: 'Semiconductor Supply Crunch', desc: '{supplier} can\'t keep up: its prices +30%, deliveries 36 hours slower.', hours: [60, 130], scope: 'global', good: false, weight: 1.5 },
+  { id: 'trade_dispute', title: 'Trade Dispute', desc: 'New tariffs: equipment installed in {place} costs +15%.', hours: [120, 280], scope: 'region', good: false, weight: 1 },
+  { id: 'energy_crisis', title: 'Regional Energy Crisis', desc: 'Electricity +28% across {place}.', hours: [72, 180], scope: 'region', good: false, weight: 1 },
+  { id: 'infra_program', title: 'Infrastructure Investment Program', desc: '{place} is fast-tracking data centers: construction −25%, permits 20% faster.', hours: [120, 300], scope: 'country', good: true, weight: 1.6 },
+  { id: 'gov_program', title: 'Government Cloud Program', desc: '{place} is buying capacity: three times as many government customers.', hours: [120, 300], scope: 'country', good: true, weight: 1.6 },
+  { id: 'efficiency_law', title: 'New Efficiency Law', desc: '{place} tightens its PUE limit and raises compliance fees.', hours: [300, 700], scope: 'country', good: false, weight: 0.9 },
+  { id: 'tax_hike', title: 'Data Center Tax Hike', desc: 'Property taxes +35% in {place}.', hours: [240, 600], scope: 'country', good: false, weight: 0.8 },
+  { id: 'tax_cut', title: 'Tech Investment Tax Cut', desc: 'Property taxes −30% in {place}.', hours: [240, 600], scope: 'country', good: true, weight: 0.9 },
 ];
 
 export const COMPANY_LOGOS = ['⬡', '◆', '▲', '●', '✦', '❖', '⬢', '◉', '⚡', '☁', '◈', '✺'];

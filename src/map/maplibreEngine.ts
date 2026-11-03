@@ -96,6 +96,12 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
   map.addLayer({ id: 'countries-hl', type: 'line', source: 'countries', filter: ['==', ['get', 'iso'], '__none'], paint: { 'line-color': '#60a5fa', 'line-width': 2.2 } });
   map.addLayer({ id: 'countries-hl-fill', type: 'fill', source: 'countries', filter: ['==', ['get', 'iso'], '__none'], maxzoom: 9, paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.18 } });
 
+  map.addSource('fiber', { type: 'geojson', data: empty() });
+  map.addLayer({ id: 'fiber-lines', type: 'line', source: 'fiber', maxzoom: 10, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: {
+    'line-color': ['get', 'color'],
+    'line-width': ['get', 'width'],
+    'line-opacity': ['case', ['get', 'live'], ['case', ['get', 'mine'], 0.95, 0.4], 0.35],
+  } });
   for (const id of ['sky-ground', 'sky-parks', 'sky-buildings']) map.addSource(id, { type: 'geojson', data: empty() });
   map.addLayer({ id: 'sky-ground', type: 'fill', source: 'sky-ground', minzoom: 10, paint: { 'fill-color': '#0d1626', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 12, 0.97] } });
   map.addLayer({ id: 'sky-parks', type: 'fill', source: 'sky-parks', minzoom: 11, paint: { 'fill-color': '#14301f', 'fill-opacity': 0.95 } });
@@ -134,8 +140,10 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
     map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: 0.32, position: [1.4, 210, 35] });
   } catch { /* ignore */ }
   let glowOn = true;
+  let glowFeatures = 0;
   const pulse = setInterval(() => {
-    if (!map.getLayer('parcels-glow')) return;
+    // setPaintProperty repaints the whole map, so only pulse when the glow can actually be seen
+    if (!glowOn || !glowFeatures || document.hidden || map.getZoom() < 12 || !container.offsetParent || !map.getLayer('parcels-glow')) return;
     const v = glowOn ? 0.4 + 0.3 * Math.sin(performance.now() / 500) : 0;
     try { map.setPaintProperty('parcels-glow', 'line-opacity', v); } catch { /* ignore */ }
   }, 120);
@@ -198,6 +206,7 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
       setData('plates', d.plates);
       setData('streets', d.streets);
       setData('parcels', d.parcels);
+      glowFeatures = d.parcels.features.length;
       setData('buildings', d.buildings);
       setData('zones', d.zones);
     },
@@ -206,6 +215,7 @@ export async function createMapLibreEngine(container: HTMLElement, ml: any, styl
       setData('sky-parks', d.parks);
       setData('sky-buildings', d.buildings);
     },
+    setFiber: (fc) => setData('fiber', fc),
     setSelectedParcel: (id) => map.setFilter('parcels-sel', ['==', ['get', 'id'], id ?? '__none']),
     setHoverInfo: (cb) => (hoverCb = cb),
     addMarker: (el: HTMLElement, ll: LngLat): MarkerHandle => {

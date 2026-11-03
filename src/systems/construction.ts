@@ -1,5 +1,6 @@
 // Data center construction: quoting premade/custom builds, projects, stages, speed-ups.
 
+import { cityMods } from './regulation';
 import type { GameState, Project } from '../core/state';
 import { newId } from '../core/state';
 import { BLUEPRINTS, blueprintById, COOLING_TIERS, ELECTRICAL_TIERS, EXTERIOR_STYLES, type CustomOptions, type BlueprintDef } from '../config/buildings';
@@ -125,6 +126,7 @@ export function buildSpec(s: GameState, parcelId: string, blueprintId: string, c
 export function quoteBuild(s: GameState, parcelId: string, blueprintId: string, custom?: CustomOptions): BuildQuote {
   const p = getParcel(parcelId)!;
   const { spec, reasons } = buildSpec(s, parcelId, blueprintId, custom);
+  spec.seconds = Math.round(spec.seconds * cityMods(s, p.cityId).permitTime);
   const st = parcelState(s, parcelId);
   if (st.owner !== 'player') reasons.push('You must own this property');
   else if (st.status === 'existing') reasons.push('Demolish the existing building first');

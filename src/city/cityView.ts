@@ -64,6 +64,27 @@ function invert(m: M4): M4 {
   r[12] = (a[5] * b07 - a[4] * b09 - a[6] * b06) * d; r[13] = (a[0] * b09 - a[1] * b07 + a[2] * b06) * d; r[14] = (a[13] * b01 - a[12] * b03 - a[14] * b00) * d; r[15] = (a[8] * b03 - a[9] * b01 + a[10] * b00) * d;
   return r;
 }
+/** Six clip planes (nx, ny, nz, d) of a view-projection matrix. */
+function planesOf(m: M4, out: Float32Array) {
+  const row = (r: number) => [m[r], m[4 + r], m[8 + r], m[12 + r]];
+  const r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
+  [[1, r0], [-1, r0], [1, r1], [-1, r1], [1, r2], [-1, r2]].forEach(([sign, r], i) => {
+    const q = r as number[], k = sign as number;
+    out[i * 4] = r3[0] + k * q[0]; out[i * 4 + 1] = r3[1] + k * q[1]; out[i * 4 + 2] = r3[2] + k * q[2]; out[i * 4 + 3] = r3[3] + k * q[3];
+  });
+}
+/** A run of indices in a shared buffer covering one patch of the city, with its bounding box. */
+interface Chunk { s: number; n: number; ds: number; dn: number; x0: number; y1: number; z0: number; x1: number; z1: number; d: number }
+function chunkVisible(c: Chunk, p: Float32Array): boolean {
+  for (let i = 0; i < 24; i += 4) {
+    const px = p[i] > 0 ? c.x1 : c.x0, py = p[i + 1] > 0 ? c.y1 : 0, pz = p[i + 2] > 0 ? c.z1 : c.z0;
+    if (p[i] * px + p[i + 1] * py + p[i + 2] * pz + p[i + 3] < 0) return false;
+  }
+  return true;
+}
+const CHUNK_CELL = 170; // metres per culling cell
+const cellKey = (x: number, z: number) => `${Math.floor(x / CHUNK_CELL)},${Math.floor(z / CHUNK_CELL)}`;
+
 const srgb = (c: RGB): number[] => [Math.pow(c[0], 2.2), Math.pow(c[1], 2.2), Math.pow(c[2], 2.2)];
 
 export function createCityView(o: CityViewOpts): CityView | null {
@@ -142,13 +163,17 @@ export function createCityView(o: CityViewOpts): CityView | null {
     g.count = m.ni;
   }
   // instanced model + per-instance buffer
-  interface IGeo extends Geo { ib2: WebGLBuffer; instances: number; data: Float32Array }
+  interface InstRange { start: number; n: number; x0: number; z0: number; x1: number; z1: number; y1: number }
+  interface IGeo extends Geo { ib2: WebGLBuffer; instances: number; data: Float32Array; ranges: InstRange[]; rest: number; tall: number }
   function makeInst(model: Mesh): IGeo {
     const g = makeGeo() as IGeo;
     upload(g, model, gl!.STATIC_DRAW);
     g.ib2 = gl!.createBuffer()!;
     g.instances = 0;
     g.data = new Float32Array(0);
+    g.ranges = [];
+    g.rest = 0;
+    g.tall = 22;
     gl!.bindVertexArray(g.vao);
     gl!.bindBuffer(gl!.ARRAY_BUFFER, g.ib2);
     gl!.enableVertexAttribArray(6); gl!.vertexAttribPointer(6, 4, gl!.FLOAT, false, 32, 0); gl!.vertexAttribDivisor(6, 1);
@@ -158,7 +183,19 @@ export function createCityView(o: CityViewOpts): CityView | null {
   }
   function setInst(g: IGeo, items: Inst[], extra = 0) {
     g.data = new Float32Array((items.length + extra) * 8);
-    items.forEach((t, i) => { const k = i * 8; g.data[k] = t.x; g.data[k + 1] = t.y; g.data[k + 2] = t.z; g.data[k + 3] = t.s; g.data[k + 4] = t.yaw; g.data[k + 5] = t.c[0]; g.data[k + 6] = t.c[1]; g.data[k + 7] = t.c[2]; });
+    // sorted into patches so off-screen trees and cars can be skipped as a group
+    const cells: Record<string, Inst[]> = {};
+    for (const t of items) (cells[cellKey(t.x, t.z)] ??= []).push(t);
+    g.ranges = [];
+    const sorted: Inst[] = [];
+    for (const key of Object.keys(cells)) {
+      const list = cells[key];
+      const q: InstRange = { start: sorted.length, n: list.length, x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity, y1: g.tall };
+      for (const t of list) { sorted.push(t); q.x0 = Math.min(q.x0, t.x - 8); q.z0 = Math.min(q.z0, t.z - 8); q.x1 = Math.max(q.x1, t.x + 8); q.z1 = Math.max(q.z1, t.z + 8); }
+      g.ranges.push(q);
+    }
+    g.rest = extra;
+    sorted.forEach((t, i) => { const k = i * 8; g.data[k] = t.x; g.data[k + 1] = t.y; g.data[k + 2] = t.z; g.data[k + 3] = t.s; g.data[k + 4] = t.yaw; g.data[k + 5] = t.c[0]; g.data[k + 6] = t.c[1]; g.data[k + 7] = t.c[2]; });
     g.instances = items.length + extra;
     gl!.bindBuffer(gl!.ARRAY_BUFFER, g.ib2);
     gl!.bufferData(gl!.ARRAY_BUFFER, g.data, extra ? gl!.DYNAMIC_DRAW : gl!.STATIC_DRAW);
@@ -215,6 +252,13 @@ export function createCityView(o: CityViewOpts): CityView | null {
   let boxes: { id: string; x0: number; z0: number; x1: number; z1: number; h: number }[] = [];
   let staticTrees: Inst[] = [], staticCars: Inst[] = [], staticTrucks: Inst[] = [], staticGlows: Glow[] = [];
   let lastSig = '';
+  let statChunks: Chunk[] = [], dynChunks: Chunk[] = [];
+  let visStat: Chunk[] = [], visDyn: Chunk[] = [];
+  const viewPlanes = new Float32Array(24), sunPlanes = new Float32Array(24);
+  let dynGroups: ParcelDef[][] = [];
+  interface Slice { key: string; h: number; v: Float32Array; i: Uint32Array; nv: number; dv: Float32Array; di: Uint32Array; dnv: number; cv: Float32Array; ci: Uint32Array; cnv: number; trees: Inst[]; cars: Inst[]; trucks: Inst[]; glows: Glow[] }
+  const slices = new Map<string, Slice>();
+  let lastDynMs = 0, drawnInst = 0;
   let selected: string | null = null, hover: string | null = null, zoneSel: string | null = null;
   let xray = false;
   let shadowDirty = true;
@@ -229,7 +273,10 @@ export function createCityView(o: CityViewOpts): CityView | null {
   const goal = { x: 0, z: 0, dist: 500, yaw: -0.65, pitch: 0.55 };
   let camPos = [0, 200, 400], VP = new Float32Array(16) as M4, invVP = new Float32Array(16) as M4;
   const MIN_D = 28, MAX_D = 1050;
-  let W = 1, H = 1, dpr = 1, scale = 1;
+  let W = 1, H = 1, dpr = 1;
+  // high-DPI screens start a notch below native and climb back up if the GPU has room
+  let scale = !o.mobile() && (window.devicePixelRatio || 1) > 1.5 ? 0.75 : 1;
+  let scaleCeil = 1;
   const clampGoal = () => {
     goal.dist = Math.max(MIN_D, Math.min(MAX_D, goal.dist));
     goal.pitch = Math.max(0.12, Math.min(1.45, goal.pitch));
@@ -265,19 +312,31 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const R = 2 + CITY_RINGS;
     extent = { x0: -2 * px - 60, z0: -2 * py - 60, x1: f.totalW + 2 * px + 60, z1: f.totalH + 2 * py + 60 };
     const mx = f.totalW / 2, mz = f.totalH / 2;
+    // everything is grouped into patches so the renderer can skip whatever is off screen
+    statChunks = [];
+    const emitted: Record<string, (() => void)[]> = {};
+    const bounds: Record<string, { x0: number; z0: number; x1: number; z1: number; h: number }> = {};
+    const queue = (x0: number, z0: number, x1: number, z1: number, h: number, draw: () => void) => {
+      const key = cellKey((x0 + x1) / 2, (z0 + z1) / 2);
+      (emitted[key] ??= []).push(draw);
+      const q = (bounds[key] ??= { x0, z0, x1, z1, h });
+      q.x0 = Math.min(q.x0, x0); q.z0 = Math.min(q.z0, z0); q.x1 = Math.max(q.x1, x1); q.z1 = Math.max(q.z1, z1); q.h = Math.max(q.h, h);
+    };
     for (const b of sky.buildings) {
       const cx = (b.rect.x0 + b.rect.x1) / 2, cz = (b.rect.y0 + b.rect.y1) / 2;
       const far = Math.hypot(cx - mx, cz - mz);
       const lim = detail === 0 ? 800 : detail === 1 ? (o.mobile() ? 900 : 1500) : 9999;
-      if (far > lim) {
-        // distant filler: facade only, no roof clutter
-        const tint: RGB = b.kind === 'glass' || b.kind === 'tower' ? [0.42, 0.55, 0.66] : [0.62, 0.59, 0.54];
-        out.m.box(b.rect.x0, 0, b.rect.y0, b.rect.x1, b.rect.y1 > 0 ? b.height : b.height, b.rect.y1, tint, { st: b.kind === 'glass' || b.kind === 'tower' ? S.glass : S.office, seed: b.seed, flr: 3.8, bay: 3.4 }, { col: [0.4, 0.4, 0.4], m: { st: S.roof, seed: b.seed } });
-      } else buildSky(out, b);
+      queue(b.rect.x0 - 3, b.rect.y0 - 3, b.rect.x1 + 3, b.rect.y1 + 3, b.height * 1.5 + 12, () => {
+        if (far > lim) {
+          // distant filler: facade only, no roof clutter
+          const tint: RGB = b.kind === 'glass' || b.kind === 'tower' ? [0.42, 0.55, 0.66] : [0.62, 0.59, 0.54];
+          out.m.box(b.rect.x0, 0, b.rect.y0, b.rect.x1, b.rect.y1 > 0 ? b.height : b.height, b.rect.y1, tint, { st: b.kind === 'glass' || b.kind === 'tower' ? S.glass : S.office, seed: b.seed, flr: 3.8, bay: 3.4 }, { col: [0.4, 0.4, 0.4], m: { st: S.roof, seed: b.seed } });
+        } else buildSky(out, b);
+      });
     }
-    sky.parks.forEach((p, i) => buildPark(out, p.rect, (i + 1) * 0.0137));
+    sky.parks.forEach((p, i) => queue(p.rect.x0, p.rect.y0, p.rect.x1, p.rect.y1, 14, () => buildPark(out, p.rect, (i + 1) * 0.0137)));
     // zone superblocks pave over the street that runs through them
-    for (const site of lay.sites) out.m.flat(site.rect.x0, site.rect.y0, site.rect.x1, site.rect.y1, 0.03, [0.46, 0.46, 0.44], { st: S.pavement, seed: 0.5 });
+    for (const site of lay.sites) queue(site.rect.x0, site.rect.y0, site.rect.x1, site.rect.y1, 1, () => out.m.flat(site.rect.x0, site.rect.y0, site.rect.x1, site.rect.y1, 0.03, [0.46, 0.46, 0.44], { st: S.pavement, seed: 0.5 }));
     const zoneRects = lay.sites.map((z) => z.rect);
     const inZone = (x: number, z: number, pad = 0) => zoneRects.some((q) => x > q.x0 - pad && x < q.x1 + pad && z > q.y0 - pad && z < q.y1 + pad);
     const r = mulberry32(hashString('street:' + id));
@@ -291,7 +350,8 @@ export function createCityView(o: CityViewOpts): CityView | null {
         const w = f.BW * 0.42, h = 8 + r() * r() * 70;
         const qx = bx + k * (f.BW * 0.5);
         const tint: RGB = r() < 0.4 ? [0.4, 0.52, 0.62] : [0.58, 0.55, 0.5];
-        out.m.box(qx, 0, bz, qx + w, h, bz + f.BH - 14, tint, { st: tint[0] < 0.5 ? S.glass : S.office, seed: r(), flr: 3.8, bay: 3.4 }, { col: [0.4, 0.4, 0.4], m: { st: S.roof, seed: 0.2 } });
+        const rimSeed = r();
+        queue(qx, bz, qx + w, bz + f.BH - 14, h, () => out.m.box(qx, 0, bz, qx + w, h, bz + f.BH - 14, tint, { st: tint[0] < 0.5 ? S.glass : S.office, seed: rimSeed, flr: 3.8, bay: 3.4 }, { col: [0.4, 0.4, 0.4], m: { st: S.roof, seed: 0.2 } }));
       }
     }
     // street trees, lamps and traffic follow the road grid
@@ -339,6 +399,12 @@ export function createCityView(o: CityViewOpts): CityView | null {
       const [a, b] = axis === 0 ? spanX : spanZ;
       traffic.push({ axis, line, lane, dir, speed: 8 + r() * 6, t: r(), a, b });
     }
+    for (const key of Object.keys(emitted)) {
+      const c: Chunk = { s: out.m.ni, n: 0, ds: out.decal.ni, dn: 0, x0: bounds[key].x0, z0: bounds[key].z0, x1: bounds[key].x1, z1: bounds[key].z1, y1: bounds[key].h, d: 0 };
+      for (const draw of emitted[key]) draw();
+      c.n = out.m.ni - c.s; c.dn = out.decal.ni - c.ds;
+      statChunks.push(c);
+    }
     upload(G.stat, out.m, gl!.STATIC_DRAW);
     upload(G.statDecal, out.decal, gl!.STATIC_DRAW);
     staticTrees = out.trees;
@@ -352,6 +418,10 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.bindBuffer(gl!.ARRAY_BUFFER, groundVb);
     gl!.bufferData(gl!.ARRAY_BUFFER, gv, gl!.STATIC_DRAW);
     parcelsList = [...lay.parcels, ...lay.sites];
+    const groups: Record<string, ParcelDef[]> = {};
+    for (const p of parcelsList) (groups[cellKey((p.rect.x0 + p.rect.x1) / 2, (p.rect.y0 + p.rect.y1) / 2)] ??= []).push(p);
+    dynGroups = Object.values(groups);
+    slices.clear();
     lastSig = '';
   }
 
@@ -378,39 +448,92 @@ export function createCityView(o: CityViewOpts): CityView | null {
     return info;
   }
 
+  /** Everything that changes how one lot looks. A lot only gets rebuilt when this changes. */
+  function parcelKey(p: ParcelDef, info: ParcelRender): string {
+    const s = o.getS();
+    const st = s.parcels[p.id];
+    let k = `${info.status}:${info.owner ?? ''}:${st?.mergedInto ?? ''}:${info.xray ? 1 : 0}:${info.color ?? ''}:${info.bp ?? ''}`;
+    if (info.owner === 'player') k += `:${s.company.color}`;
+    const f = st?.facilityId ? s.facilities[st.facilityId] : undefined;
+    if (f) { k += `:${f.color}:${f.floors}:${f.footprint}:${f.style}:${f.blueprintId}`; for (const id in f.equipment) k += `,${id}${f.equipment[id]}`; if (f.isHQ) k += `:hq${s.company.hqTier}`; }
+    if (info.status === 'construction' || info.status === 'demolishing') k += `:${Math.floor(info.progress * 20)}`;
+    return k;
+  }
+
   function signature(): string {
     const s = o.getS();
-    let sig = `${xray}|${xray ? selected : ''}|${s.company.hqTier}|`;
+    let sig = '';
     for (const p of parcelsList) {
-      const st = s.parcels[p.id];
-      if (!st) continue;
-      sig += `${p.id}:${st.status}:${st.owner}:${st.mergedInto ?? ''}`;
-      if (st.facilityId && s.facilities[st.facilityId]) sig += `:${JSON.stringify(s.facilities[st.facilityId].equipment)}:${s.facilities[st.facilityId].color}`;
-      if (st.status === 'construction' || st.status === 'demolishing') {
-        const i = renderInfo(p);
-        sig += `:${Math.floor(i.progress * 20)}`;
-      }
-      sig += ';';
+      if (!s.parcels[p.id]) continue;
+      sig += `${p.id}=${parcelKey(p, renderInfo(p))};`;
     }
     return sig;
   }
 
+  const sliceOut = () => newOut(o.mobile() ? Math.min(1, Q) : Q);
+  let scratchOut: Out | null = null;
+  function sliceOf(p: ParcelDef, s: GameState): Slice {
+    const info = renderInfo(p);
+    const key = parcelKey(p, info);
+    const had = slices.get(p.id);
+    if (had?.key === key) return had;
+    const out = (scratchOut ??= sliceOut());
+    out.m.reset(); out.decal.reset(); out.clear.reset();
+    out.trees = []; out.cars = []; out.trucks = []; out.glows = [];
+    const h = buildParcel(out, p, info, s);
+    const made: Slice = {
+      key, h,
+      v: out.m.v.slice(0, out.m.nv * STRIDE), i: out.m.i.slice(0, out.m.ni), nv: out.m.nv,
+      dv: out.decal.v.slice(0, out.decal.nv * STRIDE), di: out.decal.i.slice(0, out.decal.ni), dnv: out.decal.nv,
+      cv: out.clear.v.slice(0, out.clear.nv * STRIDE), ci: out.clear.i.slice(0, out.clear.ni), cnv: out.clear.nv,
+      trees: out.trees, cars: out.cars, trucks: out.trucks, glows: out.glows,
+    };
+    slices.set(p.id, made);
+    return made;
+  }
+  const merged = { m: new Mesh(), decal: new Mesh(), clear: new Mesh() };
+  function append(dst: Mesh, v: Float32Array, idx: Uint32Array, nv: number) {
+    if (!nv) return;
+    if ((dst.nv + nv) * STRIDE > dst.v.length) { const a = new Float32Array(Math.max(dst.v.length * 2, (dst.nv + nv) * STRIDE)); a.set(dst.v.subarray(0, dst.nv * STRIDE)); dst.v = a; }
+    if (dst.ni + idx.length > dst.i.length) { const a = new Uint32Array(Math.max(dst.i.length * 2, dst.ni + idx.length)); a.set(dst.i.subarray(0, dst.ni)); dst.i = a; }
+    dst.v.set(v, dst.nv * STRIDE);
+    const I = dst.i, base = dst.nv;
+    let k = dst.ni;
+    for (let j = 0; j < idx.length; j++) I[k++] = idx[j] + base;
+    dst.ni = k; dst.nv += nv;
+  }
+
   function buildDynamic() {
+    const t0 = performance.now();
     const s = o.getS();
-    const detail = o.mobile() ? Math.min(1, Q) : Q;
-    const out = newOut(detail);
+    const out = { trees: [] as Inst[], cars: [] as Inst[], trucks: [] as Inst[], glows: [] as Glow[] };
     const list: typeof boxes = [];
-    for (const p of parcelsList) {
-      const st = s.parcels[p.id];
-      if (p.isSite && st?.owner !== 'player') continue;
-      if (st?.mergedInto) continue;
-      const h = buildParcel(out, p, renderInfo(p), s);
-      list.push({ id: p.id, x0: p.rect.x0, z0: p.rect.y0, x1: p.rect.x1, z1: p.rect.y1, h });
+    merged.m.reset(); merged.decal.reset(); merged.clear.reset();
+    dynChunks = [];
+    for (const group of dynGroups) {
+      const c: Chunk = { s: merged.m.ni, n: 0, ds: merged.decal.ni, dn: 0, x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity, y1: 0, d: 0 };
+      for (const p of group) {
+        const st = s.parcels[p.id];
+        if (p.isSite && st?.owner !== 'player') continue;
+        if (st?.mergedInto) continue;
+        const sl = sliceOf(p, s);
+        append(merged.m, sl.v, sl.i, sl.nv);
+        append(merged.decal, sl.dv, sl.di, sl.dnv);
+        append(merged.clear, sl.cv, sl.ci, sl.cnv);
+        for (const q of sl.trees) out.trees.push(q);
+        for (const q of sl.cars) out.cars.push(q);
+        for (const q of sl.trucks) out.trucks.push(q);
+        for (const q of sl.glows) out.glows.push(q);
+        list.push({ id: p.id, x0: p.rect.x0, z0: p.rect.y0, x1: p.rect.x1, z1: p.rect.y1, h: sl.h });
+        c.x0 = Math.min(c.x0, p.rect.x0 - 8); c.z0 = Math.min(c.z0, p.rect.y0 - 8); c.x1 = Math.max(c.x1, p.rect.x1 + 8); c.z1 = Math.max(c.z1, p.rect.y1 + 8); c.y1 = Math.max(c.y1, sl.h * 1.5 + 12);
+      }
+      c.n = merged.m.ni - c.s; c.dn = merged.decal.ni - c.ds;
+      if (c.n || c.dn) dynChunks.push(c);
     }
     boxes = list;
-    upload(G.dyn, out.m, gl!.DYNAMIC_DRAW);
-    upload(G.dynDecal, out.decal, gl!.DYNAMIC_DRAW);
-    upload(G.clear, out.clear, gl!.DYNAMIC_DRAW);
+    upload(G.dyn, merged.m, gl!.DYNAMIC_DRAW);
+    upload(G.dynDecal, merged.decal, gl!.DYNAMIC_DRAW);
+    upload(G.clear, merged.clear, gl!.DYNAMIC_DRAW);
     setInst(I.tree, [...staticTrees, ...out.trees]);
     const parked = [...staticCars, ...out.cars];
     parkedCount = parked.length;
@@ -428,6 +551,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.bufferData(gl!.ARRAY_BUFFER, pointData, gl!.DYNAMIC_DRAW);
     shadowDirty = true;
     buildOutlines();
+    lastDynMs = performance.now() - t0;
   }
 
   function rectFrame(arr: number[], q: { x0: number; z0: number; x1: number; z1: number }, c: RGB, a: number, t: number, y = 0.28, dash = 0) {
@@ -467,6 +591,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
   // ---- pins ----
   let pins: (CityPin & { el: HTMLElement })[] = [];
   function refreshPins() {
+    pinsDirty = true;
     const list = o.pins().slice(0, 60);
     const keep = new Set(list.map((p) => p.id));
     pins = pins.filter((p) => { if (keep.has(p.id)) return true; p.el.remove(); return false; });
@@ -482,18 +607,26 @@ export function createCityView(o: CityViewOpts): CityView | null {
       Object.assign(e, l);
       const html = `<span class="cp-dot"></span><span class="cp-txt"><b>${esc(l.title)}</b>${l.sub ? `<small>${esc(l.sub)}</small>` : ''}</span>`;
       if (e.el.dataset.h !== html) { e.el.innerHTML = html; e.el.dataset.h = html; }
-      e.el.className = `city-pin ${l.cls}`;
+      const cn = `city-pin ${l.cls}`;
+      if (e.el.dataset.c !== cn) { e.el.className = cn; e.el.dataset.c = cn; }
     }
+    pins.sort((a, b) => Number(b.cls.includes('alert')) - Number(a.cls.includes('alert')));
   }
+  let pinsDirty = true, pinCam = [0, 0, 0, 0, 0];
   function placePins() {
+    // name tags only move when the camera does
+    const still = Math.abs(cam.x - pinCam[0]) + Math.abs(cam.z - pinCam[1]) + Math.abs(cam.dist - pinCam[2]) < 0.02 && Math.abs(cam.yaw - pinCam[3]) + Math.abs(cam.pitch - pinCam[4]) < 0.0003;
+    if (still && !pinsDirty) return;
+    pinsDirty = false;
+    pinCam = [cam.x, cam.z, cam.dist, cam.yaw, cam.pitch];
     const close = cam.dist < 620;
     const placed: number[][] = [];
-    for (const p of [...pins].sort((a, b) => Number(b.cls.includes('alert')) - Number(a.cls.includes('alert')))) {
+    for (const p of pins) {
       const X = VP[0] * p.x + VP[4] * p.y + VP[8] * p.z + VP[12], Y = VP[1] * p.x + VP[5] * p.y + VP[9] * p.z + VP[13], w = VP[3] * p.x + VP[7] * p.y + VP[11] * p.z + VP[15];
-      if (w < 1) { p.el.style.display = 'none'; continue; }
+      if (w < 1) { if (p.el.style.display !== 'none') p.el.style.display = 'none'; continue; }
       const sx = (X / w * 0.5 + 0.5) * W, sy = (1 - (Y / w * 0.5 + 0.5)) * H;
-      if (sx < -60 || sy < -40 || sx > W + 60 || sy > H + 40) { p.el.style.display = 'none'; continue; }
-      p.el.style.display = '';
+      if (sx < -60 || sy < -40 || sx > W + 60 || sy > H + 40) { if (p.el.style.display !== 'none') p.el.style.display = 'none'; continue; }
+      if (p.el.style.display) p.el.style.display = '';
       // keep name tags readable at the screen edges
       const px = Math.max(62, Math.min(W - 62, sx)), py = Math.max(44, sy);
       p.el.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px)`;
@@ -630,7 +763,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
   window.addEventListener('blur', () => keys.clear());
 
   // ---- frame ----
-  let raf = 0, last = performance.now(), frames = 0, fpsT = last, fps = 60, lastSigCheck = 0, slowSecs = 0;
+  let raf = 0, last = performance.now(), frames = 0, fpsT = last, fps = 60, lastSigCheck = 0, slowSecs = 0, smoothSecs = 0, rafGap = 16, lastRaf = last, nextDraw = 0, raisedAt = -1e9;
   let shadowCenter = [0, 0], shadowExt = 0, shadowSun = [0, 1, 0], sunVP = new Float32Array(16) as M4;
   let lightUse = getLighting('auto');
 
@@ -657,16 +790,46 @@ export function createCityView(o: CityViewOpts): CityView | null {
     }
   }
 
-  function drawOpaque(shadowPass: boolean) {
-    gl!.bindVertexArray(G.stat.vao); gl!.drawElements(gl!.TRIANGLES, G.stat.count, gl!.UNSIGNED_INT, 0);
-    gl!.bindVertexArray(G.dyn.vao); gl!.drawElements(gl!.TRIANGLES, G.dyn.count, gl!.UNSIGNED_INT, 0);
-    void shadowPass;
+  function drawChunks(geo: Geo, list: Chunk[]) {
+    if (!list.length) return;
+    gl!.bindVertexArray(geo.vao);
+    for (let i = 0; i < list.length; i++) if (list[i].n) gl!.drawElements(gl!.TRIANGLES, list[i].n, gl!.UNSIGNED_INT, list[i].s * 4);
   }
-  function drawInstanced(items: IGeo[]) {
+  function drawDecals(geo: Geo, list: Chunk[]) {
+    if (!list.length) return;
+    gl!.bindVertexArray(geo.vao);
+    for (let i = 0; i < list.length; i++) if (list[i].dn) gl!.drawElements(gl!.TRIANGLES, list[i].dn, gl!.UNSIGNED_INT, list[i].ds * 4);
+  }
+  /** Visible patches, nearest first: the depth test then rejects hidden pixels before they get shaded. */
+  function cull(list: Chunk[], planes: Float32Array, sort: boolean): Chunk[] {
+    const vis: Chunk[] = [];
+    for (let i = 0; i < list.length; i++) if (chunkVisible(list[i], planes)) vis.push(list[i]);
+    if (sort) {
+      for (const c of vis) { const dx = (c.x0 + c.x1) / 2 - camPos[0], dz = (c.z0 + c.z1) / 2 - camPos[2]; c.d = dx * dx + dz * dz; }
+      vis.sort((a, b) => a.d - b.d);
+    }
+    return vis;
+  }
+  function drawInstanced(items: IGeo[], planes: Float32Array) {
     for (const g of items) {
       if (!g.instances) continue;
       gl!.bindVertexArray(g.vao);
-      gl!.drawElementsInstanced(gl!.TRIANGLES, g.count, gl!.UNSIGNED_INT, 0, g.instances);
+      gl!.bindBuffer(gl!.ARRAY_BUFFER, g.ib2);
+      const run = (start: number, n: number) => {
+        gl!.vertexAttribPointer(6, 4, gl!.FLOAT, false, 32, start * 32);
+        gl!.vertexAttribPointer(7, 4, gl!.FLOAT, false, 32, start * 32 + 16);
+        gl!.drawElementsInstanced(gl!.TRIANGLES, g.count, gl!.UNSIGNED_INT, 0, n);
+        drawnInst += n;
+      };
+      for (const q of g.ranges) {
+        let vis = true;
+        for (let i = 0; i < 24 && vis; i += 4) {
+          const px = planes[i] > 0 ? q.x1 : q.x0, py = planes[i + 1] > 0 ? q.y1 : 0, pz = planes[i + 2] > 0 ? q.z1 : q.z0;
+          if (planes[i] * px + planes[i + 1] * py + planes[i + 2] * pz + planes[i + 3] < 0) vis = false;
+        }
+        if (vis) run(q.start, q.n);
+      }
+      if (g.rest) run(g.instances - g.rest, g.rest); // moving traffic is always considered
     }
   }
 
@@ -688,10 +851,12 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.colorMask(false, false, false, false);
     gl!.useProgram(P.shadow.p);
     gl!.uniformMatrix4fv(P.shadow.u.uSunVP, false, sunVP);
-    drawOpaque(true);
+    planesOf(sunVP, sunPlanes);
+    drawChunks(G.stat, cull(statChunks, sunPlanes, false));
+    drawChunks(G.dyn, cull(dynChunks, sunPlanes, false));
     gl!.useProgram(P.shadowI.p);
     gl!.uniformMatrix4fv(P.shadowI.u.uSunVP, false, sunVP);
-    drawInstanced([I.tree, I.truck]);
+    drawInstanced([I.tree, I.truck], sunPlanes);
     gl!.colorMask(true, true, true, true);
     gl!.bindFramebuffer(gl!.FRAMEBUFFER, null);
     shadowDirty = false;
@@ -729,15 +894,30 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const dt = Math.max(0, Math.min(0.1, (t - last) / 1000));
     // phones: 30fps is plenty for a tycoon camera and saves a lot of battery
     if (o.mobile() && t - last < 30 && !pointers.size) return;
+    // 120/144 Hz monitors: hold 60fps rather than making the GPU work 2.4x as hard
+    rafGap += (Math.min(50, t - lastRaf) - rafGap) * 0.1;
+    lastRaf = t;
+    if (!o.mobile() && rafGap < 11) {
+      if (t < nextDraw - 1) return;
+      nextDraw = Math.max(nextDraw + 1000 / 60, t);
+    }
     last = t;
     frames++;
     if (t - fpsT > 1000) {
       fps = frames; frames = 0; fpsT = t;
       o.onFrameInfo?.(fps);
       // adapt resolution if the device struggles
-      const floor = o.mobile() ? 22 : 28;
-      if (fps < floor) slowSecs++; else slowSecs = Math.max(0, slowSecs - 1);
-      if (slowSecs >= 3 && scale > 0.6 && !(window as any).__cityFixedScale) { scale = Math.max(0.6, scale - 0.15); slowSecs = 0; resize(); }
+      const floor = o.mobile() ? 24 : 42;
+      if (fps < floor) { slowSecs++; smoothSecs = 0; } else { slowSecs = Math.max(0, slowSecs - 1); smoothSecs = fps >= (o.mobile() ? 28 : 55) ? smoothSecs + 1 : 0; }
+      if (!(window as any).__cityFixedScale) {
+        if (slowSecs >= 3 && scale > 0.55) {
+          // a raise that immediately hurt marks the limit for this session
+          if (t - raisedAt < 8000) scaleCeil = Math.max(0.55, scale - 0.1);
+          scale = Math.max(0.55, scale - 0.15); slowSecs = 0; smoothSecs = 0; resize();
+        } else if (smoothSecs >= 15 && scale < scaleCeil) {
+          scale = Math.min(scaleCeil, scale + 0.1); smoothSecs = 0; raisedAt = t; resize();
+        }
+      }
     }
     if (t - lastSigCheck > 500) {
       lastSigCheck = t;
@@ -777,7 +957,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const sc = srgb(hex(L.sunColor)).map((v) => v * Math.max(0.16, Math.min(1.15, L.sunIntensity)));
     const top = srgb(hex(L.sky.top)), hor = srgb(hex(L.sky.horizon)), gnd = srgb(hex(L.sky.ground));
     if (shadowFb && sunUp) {
-      const moved = Math.hypot(cam.x - shadowCenter[0], cam.z - shadowCenter[1]) > shadowExt * 0.14 || Math.abs(Math.max(240, Math.min(1000, cam.dist * 1.5)) - shadowExt) > shadowExt * 0.14 || dot(sun, shadowSun) < 0.99998;
+      const moved = Math.hypot(cam.x - shadowCenter[0], cam.z - shadowCenter[1]) > shadowExt * 0.14 || Math.abs(Math.max(240, Math.min(1000, cam.dist * 1.5)) - shadowExt) > shadowExt * 0.14 || dot(sun, shadowSun) < 0.99993;
       if (shadowDirty || moved) renderShadow(sun);
     }
     updateTraffic(dt);
@@ -789,15 +969,22 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const time = (t / 1000) % 3600;
     const on = !!shadowFb && sunUp;
     gl!.disable(gl!.BLEND);
-    // sky
-    gl!.depthMask(false); gl!.disable(gl!.DEPTH_TEST); gl!.disable(gl!.CULL_FACE);
-    gl!.useProgram(P.sky.p);
-    sharedUniforms(P.sky, sun, sc, top, hor, gnd, time, false);
-    gl!.uniformMatrix4fv(P.sky.u.uInvVP, false, invVP);
-    gl!.uniform3fv(P.sky.u.uCamS, camPos);
-    gl!.bindVertexArray(emptyVao);
-    gl!.drawArrays(gl!.TRIANGLES, 0, 3);
     gl!.depthMask(true); gl!.enable(gl!.DEPTH_TEST);
+    // Opaque geometry goes front to back, then the ground, then the sky last: the depth test
+    // stops the expensive pixel shaders running on anything that ends up hidden.
+    planesOf(VP, viewPlanes);
+    visStat = cull(statChunks, viewPlanes, true);
+    visDyn = cull(dynChunks, viewPlanes, true);
+    gl!.enable(gl!.CULL_FACE);
+    gl!.useProgram(P.main.p);
+    sharedUniforms(P.main, sun, sc, top, hor, gnd, time, on);
+    drawChunks(G.dyn, visDyn);
+    drawChunks(G.stat, visStat);
+    gl!.disable(gl!.CULL_FACE);
+    gl!.useProgram(P.inst.p);
+    sharedUniforms(P.inst, sun, sc, top, hor, gnd, time, on);
+    drawnInst = 0;
+    drawInstanced([I.tree, I.car, I.truck, I.lamp], viewPlanes);
     // ground
     gl!.useProgram(P.ground.p);
     sharedUniforms(P.ground, sun, sc, top, hor, gnd, time, on);
@@ -807,21 +994,21 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.bindVertexArray(groundVao);
     gl!.drawArrays(gl!.TRIANGLES, 0, 6);
     gl!.disable(gl!.POLYGON_OFFSET_FILL);
-    // buildings
-    gl!.enable(gl!.CULL_FACE);
-    gl!.useProgram(P.main.p);
-    sharedUniforms(P.main, sun, sc, top, hor, gnd, time, on);
-    drawOpaque(false);
-    gl!.disable(gl!.CULL_FACE);
-    gl!.useProgram(P.inst.p);
-    sharedUniforms(P.inst, sun, sc, top, hor, gnd, time, on);
-    drawInstanced([I.tree, I.car, I.truck, I.lamp]);
+    // sky
+    gl!.depthMask(false);
+    gl!.useProgram(P.sky.p);
+    sharedUniforms(P.sky, sun, sc, top, hor, gnd, time, false);
+    gl!.uniformMatrix4fv(P.sky.u.uInvVP, false, invVP);
+    gl!.uniform3fv(P.sky.u.uCamS, camPos);
+    gl!.bindVertexArray(emptyVao);
+    gl!.drawArrays(gl!.TRIANGLES, 0, 3);
+    gl!.depthMask(true);
     // contact shadows
     gl!.enable(gl!.BLEND); gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE_MINUS_SRC_ALPHA); gl!.depthMask(false);
     gl!.enable(gl!.POLYGON_OFFSET_FILL); gl!.polygonOffset(-1, -1);
     gl!.useProgram(P.main.p);
-    gl!.bindVertexArray(G.statDecal.vao); gl!.drawElements(gl!.TRIANGLES, G.statDecal.count, gl!.UNSIGNED_INT, 0);
-    gl!.bindVertexArray(G.dynDecal.vao); gl!.drawElements(gl!.TRIANGLES, G.dynDecal.count, gl!.UNSIGNED_INT, 0);
+    drawDecals(G.statDecal, visStat);
+    drawDecals(G.dynDecal, visDyn);
     gl!.disable(gl!.POLYGON_OFFSET_FILL);
     // ownership outlines
     if (lineCount) {
@@ -845,7 +1032,8 @@ export function createCityView(o: CityViewOpts): CityView | null {
       gl!.uniform1f(P.point.u.uPx, (canvas.height / (2 * Math.tan(0.45))) * (L.night * 0.9));
       gl!.bindVertexArray(pointVao);
       gl!.bindBuffer(gl!.ARRAY_BUFFER, pointVb);
-      gl!.bufferSubData(gl!.ARRAY_BUFFER, 0, pointData);
+      // lamp and window lights never move: only the moving headlights need re-sending
+      if (traffic.length) gl!.bufferSubData(gl!.ARRAY_BUFFER, staticPointCount * 32, pointData, staticPointCount * 8, traffic.length * 16);
       gl!.drawArrays(gl!.POINTS, 0, pointData.length / 8);
     }
     gl!.disable(gl!.BLEND); gl!.depthMask(true);
@@ -908,7 +1096,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
     refresh() { lastSigCheck = 0; },
     setBottomInset(px) { bottomInset = px; },
     get visible() { return visible; },
-    stats: () => ({ fps, scale, tris: (G.stat.count + G.dyn.count) / 3, trees: I.tree.instances, cars: I.car.instances, q: Q, boxes: boxes.length, glErr: gl!.getError() }),
+    stats: () => ({ fps, scale, chunks: statChunks.length + dynChunks.length, drawn: visStat.length + visDyn.length, drawnTris: [...visStat, ...visDyn].reduce((a, c) => a + c.n, 0) / 3, dynMs: +lastDynMs.toFixed(1), drawnInst, instances: I.tree.instances + I.car.instances + I.truck.instances + I.lamp.instances, tris: (G.stat.count + G.dyn.count) / 3, trees: I.tree.instances, cars: I.car.instances, q: Q, boxes: boxes.length, glErr: gl!.getError() }),
   };
   (window as any).__city = { view, cam, goal, pick: (x: number, y: number) => pick(x, y), project: (x: number, y: number, z: number) => { const X = VP[0] * x + VP[4] * y + VP[8] * z + VP[12], Y = VP[1] * x + VP[5] * y + VP[9] * z + VP[13], w = VP[3] * x + VP[7] * y + VP[11] * z + VP[15]; return [(X / w * 0.5 + 0.5) * W, (1 - (Y / w * 0.5 + 0.5)) * H]; } };
   return view;

@@ -8,6 +8,10 @@ import { cityById, CITIES } from '../config/world';
 import { type Effects } from '../config/research';
 import { getEffects, eff, deptBonus, powerPrice, activeEvent } from './modifiers';
 import { getParcel } from '../world/parcels';
+import { cityMods, specMods, type CityMods, type SpecMods } from './regulation';
+import { netStats, type NetStats } from './fiber';
+import { equipCat } from '../config/expansion';
+import { repValuationMult } from './reputation';
 
 export interface FacStats {
   id: string;
@@ -19,6 +23,8 @@ export interface FacStats {
   allocated: Record<CapType, number>;
   free: Record<CapType, number>;
   itLoad: number;
+  /** Load once everything on order has arrived; capacity planning uses this one. */
+  itLoadAll: number;
   powerCap: number;
   coolingCap: number;
   backup: number;
@@ -52,7 +58,13 @@ export interface Derived {
   citySupply: Record<string, number>;
   cityDemand: Record<string, number>;
   playerCU: Record<string, number>;
+  net: NetStats;
   totals: {
+    transitHr: number;
+    networkHr: number;
+    integrationHr: number;
+    rndHr: number;
+    networkValue: number;
     revenueHr: number;
     expenseHr: number;
     profitHr: number;
@@ -88,35 +100,43 @@ export function landValue(s: GameState, parcelId: string): number {
 
 function rawStats(s: GameState, f: Facility, e: Effects) {
   const raw = zero();
+  let pending: Record<string, number> | null = null;
+  if (f.orders?.length) { pending = {}; for (const o of f.orders) pending[o.eq] = (pending[o.eq] ?? 0) + o.n; }
+  let itLoadAll = 0;
   let servers = 0, slotsUsed = 0, baysUsed = 0, itLoad = 0, addPower = 0, addCooling = 0, backup = 0, network = 0, security = 0, maint = 0, equipValue = 0, liquid = 0, netUnits = 0;
   for (const [id, n] of Object.entries(f.equipment)) {
     if (!n) continue;
     const d = equipmentById(id);
     if (!d) continue;
-    itLoad += d.power * n;
-    maint += d.maint * n;
+    const cat = equipCat(id);
+    const vend = cat ? f.vendor?.[cat] : undefined;
+    const vPerf = vend?.perf ?? 1;
+    const live = pending ? Math.max(0, n - (pending[id] ?? 0)) : n;
+    itLoad += d.power * live;
+    itLoadAll += d.power * n;
+    maint += d.maint * n * (vend?.rel ?? 1);
     equipValue += (d.cost + d.install) * n;
     if (d.kind === 'server') {
       slotsUsed += d.slotsUsed * n;
       if (d.cap) {
-        raw[d.cap] += d.capacity * n;
+        raw[d.cap] += d.capacity * live * vPerf;
         servers += n;
       }
       if (d.addNetwork) {
-        network += d.addNetwork * n;
+        network += d.addNetwork * n * vPerf;
         netUnits += n;
       }
     } else {
       baysUsed += n;
-      addPower += (d.addPower ?? 0) * n;
-      addCooling += (d.addCooling ?? 0) * n;
+      addPower += (d.addPower ?? 0) * n * vPerf;
+      addCooling += (d.addCooling ?? 0) * n * vPerf;
       backup += (d.backup ?? 0) * n;
       security += (d.security ?? 0) * n;
       if (id === 'liquid') liquid += n;
     }
   }
   network *= 1 + eff(e, 'networkCap');
-  return { raw, servers, slotsUsed, baysUsed, itLoad, addPower, addCooling, backup, network, security, maint, equipValue, liquid, netUnits };
+  return { raw, itLoadAll, servers, slotsUsed, baysUsed, itLoad, addPower, addCooling, backup, network, security, maint, equipValue, liquid, netUnits };
 }
 
 export function deriveAll(s: GameState): Derived {
@@ -124,6 +144,12 @@ export function deriveAll(s: GameState): Derived {
   const fac: Record<string, FacStats> = {};
   const playerCU: Record<string, number> = {};
   const pre: { f: Facility; st: FacStats; r: ReturnType<typeof rawStats> }[] = [];
+  const net = netStats(s);
+  const modsByCity: Record<string, CityMods> = {};
+  const specByCity: Record<string, SpecMods> = {};
+  const modsOf = (id: string) => (modsByCity[id] ??= cityMods(s, id));
+  const specOf = (id: string) => (specByCity[id] ??= specMods(s, id, e));
+  const opexE = eff(e, 'opex');
 
   const itBonusG = deptBonus(s, 'it');
   const financeBonus = deptBonus(s, 'finance');
@@ -155,7 +181,8 @@ export function deriveAll(s: GameState): Derived {
     const networkFactor = r.servers <= allow ? 1 : 0.4 + 0.6 * Math.min(1, (r.network + allow) / r.servers);
     const conditionFactor = f.condition >= 70 ? 1 : 0.5 + f.condition / 140;
     const perfBoost = 1 + eff(e, 'perf') + itB * 0.15 + (r.liquid > 0 ? 0.03 : 0) + campus;
-    const perf = Math.max(0, powerFactor * coolingFactor * networkFactor * conditionFactor * perfBoost);
+    const integrating = !!f.integrateUntil && f.integrateUntil > s.gameHours;
+    const perf = Math.max(0, powerFactor * coolingFactor * networkFactor * conditionFactor * perfBoost * (integrating ? 0.85 : 1));
     const ratio = coolingCap > 0 ? load / coolingCap : load > 0 ? 2 : 0;
     const temperature = ratio <= 1 ? 19 + 16 * ratio : 35 + 22 * (ratio - 1);
     const coolTier = f.custom?.coolingTier ?? 0;
@@ -170,14 +197,18 @@ export function deriveAll(s: GameState): Derived {
 
     const pp = powerPrice(s, f.cityId) * ECONOMY.powerCostScale;
     const lv = landValue(s, f.parcelId);
+    const mods = modsOf(f.cityId), spec = specOf(f.cityId);
+    const overLimit = !f.isHQ && pue > mods.pueLimit;
+    const opexK = 1 + opexE + spec.opex;
     const expenses: Record<string, number> = {
+      compliance: overLimit ? load * pp * mods.carbonFee * (outage ? 0.2 : 1) : 0,
       electricity: load * pp * (1 - eff(e, 'electricityCost') - elecB * 0.4) * (outage ? 0.2 : 1),
       cooling: load * (pue - 1) * pp * (1 - coolB * 0.6) + coolingCap * ECONOMY.coolingMaintPerKW,
-      maintenance: r.maint * (1 - eff(e, 'maint') - itB),
-      building: f.shellValue * ECONOMY.buildingMaintRate * (1 - opsB * 0.33),
-      tax: (lv * city.tax * ECONOMY.propertyTaxScale) / 8760 * (1 - financeBonus),
+      maintenance: r.maint * (1 - eff(e, 'maint') - itB) * opexK,
+      building: f.shellValue * ECONOMY.buildingMaintRate * (1 - opsB * 0.33) * opexK,
+      tax: (lv * city.tax * mods.taxMult * ECONOMY.propertyTaxScale) / 8760 * (1 - financeBonus),
       insurance: (f.shellValue + r.equipValue) * ECONOMY.insuranceRate * (1 - financeBonus * 0.5),
-      connectivity: (ECONOMY.connectivityBase + ECONOMY.connectivityPerNetwork * r.netUnits) * (1 - eff(e, 'connectivity')),
+      connectivity: (ECONOMY.connectivityBase + ECONOMY.connectivityPerNetwork * r.netUnits) * (1 - eff(e, 'connectivity')) * (1 - (net.city[f.cityId]?.connectCut ?? 0)) * (1 + spec.connectivity),
     };
     for (const k of Object.keys(expenses)) expenses[k] = Math.max(0, expenses[k]);
 
@@ -186,11 +217,14 @@ export function deriveAll(s: GameState): Derived {
     if (coolingFactor < 0.999) warnings.push('Overheating — cooling capacity exceeded');
     if (networkFactor < 0.999) warnings.push('Network bottleneck — add switches');
     if (f.condition < 70) warnings.push('Facility needs maintenance');
+    if (overLimit) warnings.push(`PUE ${pue.toFixed(2)} is above the local limit of ${mods.pueLimit.toFixed(2)}: paying compliance fees`);
+    if (integrating) warnings.push('Integrating into your company: running at reduced performance');
+    if (f.orders?.length) warnings.push('Hardware on order: not running yet');
 
     const st: FacStats = {
       id: f.id, servers: r.servers, slotsUsed: r.slotsUsed, baysUsed: r.baysUsed,
       raw: r.raw, delivered, allocated: zero(), free: zero(),
-      itLoad: load, powerCap, coolingCap, backup: r.backup, network: r.network,
+      itLoad: load, itLoadAll: r.itLoadAll, powerCap, coolingCap, backup: r.backup, network: r.network,
       powerFactor, coolingFactor, networkFactor, conditionFactor, outage, perf, temperature, pue,
       security: r.security + (f.custom?.security ?? 0) + secStaff,
       revenue: { contracts: 0, spot: 0 }, expenses,
@@ -208,10 +242,11 @@ export function deriveAll(s: GameState): Derived {
   const cityPrice: Record<string, number> = {};
   const citySupply: Record<string, number> = {};
   const cityDemand: Record<string, number> = {};
+  const rivalCU: Record<string, number> = {};
+  for (const comp of s.competitors) for (const site of comp.sites) if (site.stage === 'operational') rivalCU[site.cityId] = (rivalCU[site.cityId] ?? 0) + site.cu;
   for (const c of CITIES) {
-    let supply = playerCU[c.id] ?? 0;
-    for (const comp of s.competitors) for (const site of comp.sites) if (site.cityId === c.id && site.stage === 'operational') supply += site.cu;
-    const demand = c.demand * ECONOMY.demandScale * (s.cityDemand[c.id] ?? 1);
+    const supply = (playerCU[c.id] ?? 0) + (rivalCU[c.id] ?? 0);
+    const demand = c.demand * ECONOMY.demandScale * (s.cityDemand[c.id] ?? 1) * modsOf(c.id).demandMult;
     citySupply[c.id] = supply;
     cityDemand[c.id] = demand;
     let price = Math.max(ECONOMY.priceFloor, Math.min(ECONOMY.priceTop, ECONOMY.priceTop - ECONOMY.priceSlope * (supply / demand)));
@@ -221,6 +256,8 @@ export function deriveAll(s: GameState): Derived {
 
   // ---- contracts & spot revenue ----
   const boom = s.events.some((x) => x.defId === 'ai_boom');
+  const cloudSurge = s.events.some((x) => x.defId === 'cloud_surge');
+  const capRate: Record<CapType, number> = { cpu: eff(e, 'cpuRate'), gpu: eff(e, 'gpuRate'), storage: eff(e, 'storageRate') };
   const contractsByFac: Record<string, typeof s.contracts.active> = {};
   for (const ct of s.contracts.active) if (ct.facilityId) (contractsByFac[ct.facilityId] ??= []).push(ct);
   for (const { f, st } of pre) {
@@ -240,6 +277,8 @@ export function deriveAll(s: GameState): Derived {
       st.free[c] = Math.max(0, remaining[c]);
       let rate = ECONOMY.revenueRates[c] * ECONOMY.spotRateFraction * cityPrice[f.cityId];
       if (boom && c === 'gpu') rate *= 1.4;
+      if (cloudSurge && c !== 'gpu') rate *= 1.25;
+      rate *= 1 + capRate[c] + specOf(f.cityId).rates[c] + (net.city[f.cityId]?.spotBonus ?? 0);
       spot += st.free[c] * rate;
     });
     st.revenue = { contracts: cRev, spot };
@@ -254,6 +293,7 @@ export function deriveAll(s: GameState): Derived {
 
   // ---- company totals ----
   const t: Derived['totals'] = {
+    transitHr: net.transitHr, networkHr: net.upkeepHr, integrationHr: 0, rndHr: 0, networkValue: net.value,
     revenueHr: 0, expenseHr: 0, profitHr: 0, salariesHr: 0, landTaxHr: 0, interestHr: 0, hqHr: 0,
     delivered: zero(), raw: zero(), landValue: 0, buildingValue: 0, equipmentValue: 0, valuation: 0,
     facilities: 0, properties: 0, cities: 0, countries: 0, cu: 0,
@@ -280,7 +320,7 @@ export function deriveAll(s: GameState): Derived {
     const p = getParcel(pid);
     if (!p) continue;
     if (ps.status !== 'facility' && ps.status !== 'hq') {
-      t.landTaxHr += (lv * cityById(p.cityId).tax * ECONOMY.propertyTaxScale) / 8760 * (1 - financeBonus);
+      t.landTaxHr += (lv * cityById(p.cityId).tax * modsOf(p.cityId).taxMult * ECONOMY.propertyTaxScale) / 8760 * (1 - financeBonus);
     }
   }
   for (const f of Object.values(s.facilities)) {
@@ -290,13 +330,16 @@ export function deriveAll(s: GameState): Derived {
   }
   t.cities = cities.size;
   t.countries = countries.size;
-  t.salariesHr = s.employees.reduce((a, x) => a + x.salary, 0);
+  t.salariesHr = s.employees.reduce((a, x) => a + x.salary, 0) * (1 + eff(e, 'salaryCost'));
+  t.revenueHr += net.transitHr;
+  t.rndHr = Math.max(0, t.revenueHr) * eff(e, 'rndBudget');
+  for (const x of s.integrations) if (x.until > s.gameHours) t.integrationHr += x.costHr;
   t.interestHr = (s.debt * ECONOMY.loanInterestPerDay * (1 - financeBonus * 0.5)) / 24;
   t.hqHr = ECONOMY.hqUpkeep[s.company.hqTier] ?? 0;
-  t.expenseHr += t.salariesHr + t.landTaxHr + t.interestHr + t.hqHr;
+  t.expenseHr += t.salariesHr + t.landTaxHr + t.interestHr + t.hqHr + net.upkeepHr + t.integrationHr + t.rndHr;
   t.profitHr = t.revenueHr - t.expenseHr;
-  const earnings = Math.max(0, s.finance.avgHourProfit) * ECONOMY.profitMultipleHours;
-  t.valuation = Math.max(0, s.cash - s.debt + t.landValue + t.buildingValue + t.equipmentValue + earnings);
+  const earnings = Math.max(0, s.finance.avgHourProfit) * ECONOMY.profitMultipleHours * repValuationMult(s.company.reputation);
+  t.valuation = Math.max(0, s.cash - s.debt + t.landValue + t.buildingValue + t.equipmentValue + net.value + earnings);
   void itBonusG;
-  return { effects: e, fac, cityPrice, citySupply, cityDemand, playerCU, totals: t };
+  return { effects: e, fac, cityPrice, citySupply, cityDemand, playerCU, net, totals: t };
 }

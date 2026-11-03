@@ -67,6 +67,8 @@ export const CITIES: CityDef[] = [
   { id: 'melbourne', name: 'Melbourne', country: 'AU', region: 'Oceania', center: [144.96, -37.81], district: [144.92, -37.83], districtName: 'Port Melbourne Tech Park', landMult: 1.6, powerPrice: 0.19, constructionMult: 1.25, demand: 8000, tax: 0.013, grid: 0.92, unlockLevel: 16, license: 7_500_000, blurb: 'Growing southern hub with strong research customers.' },
 ];
 
-export const cityById = (id: string): CityDef => CITIES.find((c) => c.id === id)!;
-export const countryById = (id: string): CountryDef => COUNTRIES.find((c) => c.id === id)!;
+const CITY_MAP = new Map(CITIES.map((c) => [c.id, c]));
+const COUNTRY_MAP = new Map(COUNTRIES.map((c) => [c.id, c]));
+export const cityById = (id: string): CityDef => CITY_MAP.get(id)!;
+export const countryById = (id: string): CountryDef => COUNTRY_MAP.get(id)!;
 export const citiesInCountry = (id: string): CityDef[] => CITIES.filter((c) => c.country === id);

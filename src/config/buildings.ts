@@ -36,7 +36,8 @@ export const BLUEPRINTS: BlueprintDef[] = [
   { id: 'mega', name: 'Mega AI Data Center Campus', cost: 500_000_000, slots: 2000, bays: 48, power: 42000, cooling: 38000, minLot: 36000, floors: 8, buildSeconds: 1400, level: 38, footprint: 0.62, style: 'metal', color: '#f6ad55', desc: 'Gigawatt-class campus. Requires a consolidated development zone.', slotsPerM2: 0.03, kwPerSlot: 21, maxFloors: 9 },
 ];
 
-export const blueprintById = (id: string) => BLUEPRINTS.find((b) => b.id === id)!;
+const BLUEPRINT_MAP = new Map(BLUEPRINTS.map((b) => [b.id, b]));
+export const blueprintById = (id: string) => BLUEPRINT_MAP.get(id)!;
 
 export interface CustomOptions {
   floors: number;
@@ -113,7 +114,8 @@ export const EQUIPMENT: EquipmentDef[] = [
   { id: 'security', name: 'Security System', kind: 'infra', capacity: 0, cost: 40_000, install: 3_000, power: 1, maint: 1.5, rating: 5, security: 1, slotsUsed: 0, desc: 'Biometrics, cameras and mantraps. +1 security tier.', icon: '🛡️' },
 ];
 
-export const equipmentById = (id: string) => EQUIPMENT.find((e) => e.id === id)!;
+const EQUIPMENT_MAP = new Map(EQUIPMENT.map((e) => [e.id, e]));
+export const equipmentById = (id: string) => EQUIPMENT_MAP.get(id)!;
 
 export const CAP_LABEL: Record<CapType, { name: string; unit: string; color: string }> = {
   cpu: { name: 'CPU Compute', unit: 'cores', color: '#60a5fa' },

@@ -230,12 +230,19 @@ export function consolidateZone(s: GameState, zoneId: string): Check {
   return { ok: true };
 }
 
+/** Market license price after company strategy. */
+export function licenseFee(s: GameState, cityId: string): number {
+  const base = cityById(cityId).license;
+  return base ? Math.round((base * (1 + eff(getEffects(s), 'licenseCost'))) / 1000) * 1000 : 0;
+}
+
 export function unlockCity(s: GameState, cityId: string): Check {
   const c = cityById(cityId);
+  const fee = licenseFee(s, cityId);
   if (isCityUnlocked(s, cityId)) return { ok: false, reason: 'Already unlocked' };
   if (s.level < c.unlockLevel) return { ok: false, reason: `Requires company level ${c.unlockLevel}` };
-  if (!canAfford(s, c.license)) return { ok: false, reason: `Need ${money(c.license)}` };
-  if (c.license > 0) spend(s, c.license, 'Licenses', `Market entry license: ${c.name}`);
+  if (!canAfford(s, fee)) return { ok: false, reason: `Need ${money(fee)}` };
+  if (fee > 0) spend(s, fee, 'Licenses', `Market entry license: ${c.name}`);
   s.unlockedCities.push(cityId);
   log(s, `Entered the ${c.name} market`, 'good');
   toast({ title: `${c.name} unlocked`, body: c.blurb, kind: 'good', icon: countryById(c.country).flag });
