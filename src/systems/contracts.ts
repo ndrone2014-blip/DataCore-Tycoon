@@ -180,7 +180,7 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
     else ct.breachHours = Math.max(0, ct.breachHours - dt * 0.5);
     if (ct.breachHours > ECONOMY.slaGraceHours * 0.5 && !(ct as any).warned) {
       (ct as any).warned = true;
-      toast({ title: 'Customer unhappy', body: `${ct.customer} is getting poor service (${Math.round(ct.fulfillment * 100)}% of promised capacity). Fix power, cooling or capacity soon.`, kind: 'warn', icon: '⚠️' });
+      toast({ title: 'Customer unhappy', body: `${ct.customer} is getting poor service (${Math.round(ct.fulfillment * 100)}% of promised capacity). Fix power, cooling or capacity soon.`, kind: 'warn', icon: '⚠️', channel: 'contract-problem' });
     }
     if (ct.breachHours > ECONOMY.slaGraceHours) {
       c.active.splice(i, 1);
@@ -196,8 +196,8 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
       s.company.reputation = Math.max(0, s.company.reputation - 4);
       stat(s, 'contractsBreached');
       log(s, `${ct.customer} cancelled their contract after repeated SLA breaches (−${money(fee)})`, 'bad');
-      toast({ title: 'Contract cancelled', body: `${ct.customer} left due to poor service. Check power, cooling and capacity.`, kind: 'bad', icon: '⚠️' });
-      sfx('error');
+      toast({ title: 'Contract cancelled', body: `${ct.customer} left due to poor service. Check power, cooling and capacity.`, kind: 'bad', icon: '⚠️', channel: 'contract-problem' });
+      if (s.settings.contractAlerts !== 'off') sfx('error');
       continue;
     }
     if (ct.hoursLeft <= 0) {
@@ -209,8 +209,8 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
       stat(s, 'contractsCompleted');
       addXp(s, ECONOMY.xp.contractComplete + ct.earned / ECONOMY.xp.contractPer, 'Contract');
       log(s, `Contract with ${ct.customer} completed — earned ${money(ct.earned)}`, 'good');
-      toast({ title: 'Contract completed', body: `${ct.customer}: ${money(ct.earned)} earned. Reputation +2.`, kind: 'good', icon: '✅' });
-      sfx('cash');
+      toast({ title: 'Contract completed', body: `${ct.customer}: ${money(ct.earned)} earned. Reputation +2.`, kind: 'good', icon: '✅', channel: 'contract' });
+      if ((s.settings.contractAlerts ?? 'all') === 'all') sfx('cash');
     }
   }
   if (c.history.length > 80) c.history.length = 80;

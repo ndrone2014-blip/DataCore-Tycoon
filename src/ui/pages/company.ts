@@ -10,6 +10,8 @@ import { cityById } from '../../config/world';
 import { blueprintById } from '../../config/buildings';
 import { ACHIEVEMENTS, METRICS, currentStory, missionProgress, claimMission, STORY } from '../../systems/progression';
 import { COMPANY_COLORS, COMPANY_LOGOS } from '../../config/content';
+import { applyMode, deviceMode, type DeviceMode } from '../../core/device';
+import { acquireCompetitor, acquisitionQuote } from '../../systems/competitors';
 import { exportSave, importSaveFile, deleteSaves, saveGame } from '../../save/save';
 
 const START = Date.UTC(2027, 0, 1, 8);
@@ -86,7 +88,7 @@ export function renderCompetitors(app: App): string {
   <div class="card">
     <h3>Industry leaderboard</h3>
     <table class="tbl"><thead><tr><th>#</th><th>Company</th><th>Valuation</th><th>Revenue/h</th><th>Profit/h</th><th>Facilities</th><th>Cities</th><th>Compute (CU)</th><th>Tech</th><th></th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr class="${r.id === 'player' ? 'me' : ''}"><td>${i + 1}</td><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b>${r.id === 'player' ? ' <span class="tag ok sm">You</span>' : ''}</td><td>${money(r.valuation)}</td><td>${money(r.revenueHr)}</td><td class="${r.revenueHr - r.expenseHr >= 0 ? 'pos' : 'neg'}">${money(r.revenueHr - r.expenseHr)}</td><td>${r.sites}</td><td>${r.cities}</td><td>${num(r.cu)}</td><td>${r.id === 'player' ? `${r.tech} researched` : `Level ${r.tech}`}</td><td>${r.id !== 'player' ? `<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Inspect</button>` : ''}</td></tr>`).join('')}
+    ${rows.map((r, i) => `<tr class="${r.id === 'player' ? 'me' : ''}"><td>${i + 1}</td><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b>${r.id === 'player' ? ' <span class="tag ok sm">You</span>' : ''}</td><td>${money(r.valuation)}</td><td>${money(r.revenueHr)}</td><td class="${r.revenueHr - r.expenseHr >= 0 ? 'pos' : 'neg'}">${money(r.revenueHr - r.expenseHr)}</td><td>${r.sites}</td><td>${r.cities}</td><td>${num(r.cu)}</td><td>${r.id === 'player' ? `${r.tech} researched` : `Level ${r.tech}`}</td><td class="row gap">${r.id !== 'player' ? `<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Inspect</button>${(() => { const q = acquisitionQuote(s, r.id); return btn('🤝 Buy', 'buyComp', { id: r.id }, 'primary sm', q.ok ? undefined : q.reason); })()}` : ''}</td></tr>`).join('')}
     </tbody></table>
   </div>
   <div class="card mt"><h3>Valuation over time</h3>${labels.length > 1 ? chart('comp-val', { type: 'line', money: true, height: 260, labels, datasets: [{ label: s.company.name, data: tail(s.finance.valuationHistory) as number[], color: s.company.color }, ...s.competitors.map((c) => ({ label: c.name, data: tail(c.history) as number[], color: c.color, dashed: true }))] }) : empty('📈', 'Gathering data', 'History is recorded every game day.')}</div>
@@ -95,6 +97,7 @@ export function renderCompetitors(app: App): string {
     <p class="muted">${esc(sel.desc)} Strategy: <b>${sel.personality}</b> · Aggression ${sel.aggression.toFixed(1)} · Profit focus ${sel.profitFocus.toFixed(1)} · Tech focus ${sel.techFocus.toFixed(1)} · Frugality ${sel.frugality.toFixed(1)}</p>
     <div class="grid6 mini-stats"><div><label>Valuation</label><b>${money(sel.valuation)}</b></div><div><label>Cash</label><b>${money(sel.cash)}</b></div><div><label>Revenue/h</label><b>${money(sel.revenueHr)}</b></div><div><label>Expenses/h</label><b>${money(sel.expenseHr)}</b></div><div><label>Tech level</label><b>${sel.techLevel}</b></div><div><label>Deals won</label><b>${sel.contractsWon}</b></div></div>
     <p class="small"><b>Latest move:</b> ${esc(sel.lastAction)}</p>
+    ${(() => { const q = acquisitionQuote(s, sel.id); return `<div class="callout acquire"><div><b>Buy ${esc(sel.name)} for ${money(q.price)}</b><br><small>The price is their valuation. You get their ${q.lots} properties, ${q.facilities} running data centers (hardware included) and ${money(q.cashAcquired)} in cash. Half-finished projects are written off, and they leave the market for good.</small></div>${btn('🤝 Buy company', 'buyComp', { id: sel.id }, 'primary', q.ok ? undefined : q.reason)}</div>`; })()}
     <table class="tbl"><thead><tr><th>Site</th><th>City</th><th>Facility</th><th>Status</th><th>Capacity</th><th></th></tr></thead><tbody>
     ${sel.sites.map((x) => `<tr><td class="mono">${x.parcelId.toUpperCase()}</td><td>${cityById(x.cityId).name}</td><td>${blueprintById(x.blueprintId).name}</td><td>${x.stage === 'operational' ? '<span class="tag ok">Operational</span>' : `<span class="tag">${x.stage === 'demolish' ? 'Demolishing' : 'Building'} ${pct(x.progress / x.total)}</span>`}</td><td>${bar(x.maxCu ? x.cu / x.maxCu : 0, '', `${num(x.cu)} / ${num(x.maxCu)} CU`)}</td><td><button class="btn ghost sm" data-act="openParcel" data-id="${x.parcelId}">View</button></td></tr>`).join('')}
     </tbody></table></div>` : ''}`;
@@ -138,7 +141,7 @@ export function renderSettings(app: App): string {
       <div class="set-row"><span>Logo</span><div class="logo-pick">${COMPANY_LOGOS.map((l) => `<button class="${s.company.logo === l ? 'on' : ''}" data-act="coLogo" data-v="${l}">${l}</button>`).join('')}</div></div>
       <div class="set-row"><span>Company color</span><div class="color-pick">${COMPANY_COLORS.map((c) => `<button class="${s.company.color === c ? 'on' : ''}" style="background:${c}" data-act="coColor" data-v="${c}"></button>`).join('')}</div></div>
       <h3 class="mt">🎨 Graphics & performance</h3>
-      <label class="set-row"><span>Graphics quality</span><select data-change="setting" data-k="graphics">${['low', 'medium', 'high'].map((g) => `<option value="${g}" ${st.graphics === g ? 'selected' : ''}>${g[0].toUpperCase() + g.slice(1)}</option>`).join('')}</select></label>
+      <label class="set-row"><span>Graphics quality<small>City detail updates after a reload</small></span><select data-change="setting" data-k="graphics">${['low', 'medium', 'high'].map((g) => `<option value="${g}" ${st.graphics === g ? 'selected' : ''}>${g[0].toUpperCase() + g.slice(1)}</option>`).join('')}</select></label>
       <label class="set-row"><span>Time of day<small>Lighting for the 3D view & map</small></span><select data-change="setting" data-k="timeOfDay">${[['auto', 'Cinematic cycle'], ['day', 'Day'], ['sunset', 'Golden hour'], ['night', 'Night']].map(([v, l]) => `<option value="${v}" ${st.timeOfDay === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${check('bloom', 'Glow effects', st.bloom, 'Neon accents, light halos, pulsing markers')}
       ${check('celebrations', 'Celebrations', st.celebrations !== false, 'Confetti on level-ups & achievements, income pops')}
@@ -146,6 +149,7 @@ export function renderSettings(app: App): string {
       ${check('reduceMotion', 'Reduce motion', st.reduceMotion, 'Fewer camera animations')}
       ${check('forceFallbackMap', 'Use offline map', st.forceFallbackMap, 'Skips MapLibre / online tiles (reload required)')}
       ${check('showFps', 'Show tick rate', st.showFps)}
+      <label class="set-row"><span>Device mode<small>Layout, controls and graphics limits</small></span><select data-change="deviceMode"><option value="pc" ${deviceMode() === 'pc' ? 'selected' : ''}>🖥️ PC</option><option value="mobile" ${deviceMode() === 'mobile' ? 'selected' : ''}>📱 Mobile</option></select></label>
       <h3 class="mt">🎥 Camera</h3>
       ${range('cameraSensitivity', 'Camera sensitivity', 0.3, 2.5, 0.1, st.cameraSensitivity, (x) => x.toFixed(1) + '×')}
       ${check('invertZoom', 'Invert scroll zoom', st.invertZoom, 'Offline map & 3D view')}
@@ -157,6 +161,8 @@ export function renderSettings(app: App): string {
       ${range('musicVolume', 'Ambient music', 0, 1, 0.05, st.musicVolume, (x) => Math.round(x * 100) + '%')}
       <h3 class="mt">😌 Comfort</h3>
       ${check('autoContracts', 'Auto-sign contracts', !!st.autoContracts, 'Accept every offer that fits a facility')}
+      ${check('autoAssignStaff', 'Auto-assign staff', !!st.autoAssignStaff, 'New hires and new sites get staffed automatically')}
+      <label class="set-row"><span>Contract notifications<small>Pop-ups, sounds and the menu badge</small></span><select data-change="setting" data-k="contractAlerts">${[['all', 'All'], ['problems', 'Problems only'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${(st.contractAlerts ?? 'all') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${check('autoLoan', 'Overdraft protection', st.autoLoan !== false, 'The bank covers shortfalls instead of letting cash go negative')}
       <p class="small muted">Tip: press <b>Space</b> or <b>⏸ Stop time</b> to freeze the economy while you plan — construction and research keep going.</p>
       <h3 class="mt">💾 Save management</h3>
@@ -182,6 +188,15 @@ export function renderSettings(app: App): string {
 
 export function companyActions(app: App) {
   return {
+    buyComp: (el: HTMLElement) => {
+      const id = el.dataset.id!;
+      const c = app.s.competitors.find((x) => x.id === id);
+      if (!c) return;
+      const q = acquisitionQuote(app.s, id);
+      confirmDialog(`Buy ${esc(c.name)}?`, `Pay <b>${money(q.price)}</b> (their valuation). You receive their ${q.lots} properties, ${q.facilities} data centers and ${money(q.cashAcquired)} of cash. This can't be undone.`, 'Buy company', () => {
+        if (app.run(() => acquireCompetitor(app.s, id))) app.ui.compId = null;
+      });
+    },
     finTab: (el: HTMLElement) => { app.ui.financeTab = el.dataset.v; app.render(); },
     loan: (el: HTMLElement) => app.run(() => takeLoan(app.s, app.d, Number(el.dataset.v))),
     repay: (el: HTMLElement) => app.run(() => repayLoan(app.s, Number(el.dataset.v))),
@@ -214,6 +229,10 @@ export function companyActions(app: App) {
 
 export function companyChanges(app: App) {
   return {
+    deviceMode: (el: HTMLElement) => {
+      applyMode((el as HTMLSelectElement).value as DeviceMode, true);
+      void app.save(true).then(() => location.reload());
+    },
     setting: (el: HTMLElement) => {
       const k = el.dataset.k! as keyof typeof app.s.settings;
       const inp = el as HTMLInputElement;

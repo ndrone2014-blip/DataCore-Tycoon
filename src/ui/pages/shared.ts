@@ -50,3 +50,11 @@ export function capBar(used: number, total: number, label: string, unit: string)
   const r = total > 0 ? used / total : 0;
   return `<div class="capbar"><div class="row between"><span>${label}</span><small>${Math.round(used).toLocaleString()} / ${Math.round(total).toLocaleString()} ${unit}</small></div>${bar(r, r > 1 ? 'bad' : r > 0.9 ? 'warn' : '')}</div>`;
 }
+
+/** How badly a data center needs servers. Drives the alert chip, map pins and the Data Centers filter. */
+export function dcNeed(f: { slots: number }, st: { slotsUsed: number } | undefined): { level: 'empty' | 'low' | 'ok'; label: string } {
+  const used = st?.slotsUsed ?? 0;
+  if (used === 0) return { level: 'empty', label: 'No servers yet' };
+  if (used < f.slots * 0.5) return { level: 'low', label: `Racks ${Math.round((used / f.slots) * 100)}% full` };
+  return { level: 'ok', label: `Racks ${Math.round((used / f.slots) * 100)}% full` };
+}

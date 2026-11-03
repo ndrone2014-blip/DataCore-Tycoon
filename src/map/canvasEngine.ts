@@ -624,7 +624,11 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
 
   // ---- interaction ----
   let drag: { x: number; y: number; moved: boolean } | null = null;
+  const touches = new Map<number, { x: number; y: number }>();
+  let pinchD = 0;
   canvas.addEventListener('pointerdown', (e) => {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { const [a, b] = [...touches.values()]; pinchD = Math.hypot(a.x - b.x, a.y - b.y); }
     drag = { x: e.clientX, y: e.clientY, moved: false };
     canvas.setPointerCapture(e.pointerId);
     canvas.style.cursor = 'grabbing';
@@ -632,6 +636,15 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
   });
   canvas.addEventListener('pointermove', (e) => {
     const r = canvas.getBoundingClientRect();
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size >= 2) {
+      const [a, b] = [...touches.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchD > 0 && d > 0) { zoom = clampZoom(zoom + Math.log2(d / pinchD)); dirty = true; moveCbs.forEach((cb) => cb()); }
+      pinchD = d;
+      if (drag) drag.moved = true;
+      return;
+    }
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
@@ -654,7 +667,9 @@ export function createCanvasEngine(container: HTMLElement): MapEngine {
       hoverCb?.(h.type === 'none' ? null : h);
     }
   });
+  canvas.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); drag = null; });
   canvas.addEventListener('pointerup', (e) => {
+    touches.delete(e.pointerId);
     const r = canvas.getBoundingClientRect();
     if (drag && !drag.moved) {
       const h = hitTest(e.clientX - r.left, e.clientY - r.top);

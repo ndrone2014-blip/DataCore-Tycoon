@@ -194,6 +194,8 @@ export interface Settings {
   autoContracts: boolean;
   autoLoan: boolean;
   celebrations: boolean;
+  contractAlerts: 'all' | 'problems' | 'off';
+  autoAssignStaff: boolean;
 }
 
 export interface LogEntry {
@@ -300,6 +302,8 @@ export function defaultSettings(): Settings {
     autoContracts: false,
     autoLoan: true,
     celebrations: true,
+    contractAlerts: 'all',
+    autoAssignStaff: false,
   };
 }
 

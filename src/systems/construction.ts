@@ -264,7 +264,7 @@ export function finishBuild(s: GameState, projectId: string): string | undefined
     stat(s, `built_${d.blueprintId}`);
     addXp(s, ECONOMY.xp.buildComplete + pr.cost / ECONOMY.xp.buildPer, 'Construction');
     log(s, `${d.name} is complete and ready for servers`, 'good');
-    toast({ title: 'Construction complete!', body: `${d.name} is operational. Install servers to start earning.`, kind: 'good', icon: '🏁' });
+    toast({ title: 'Construction complete!', body: `${d.name} is operational. Tap here to install servers and start earning.`, kind: 'good', icon: '🏁', dcId: fid });
   }
   sfx('complete');
   emit('world');

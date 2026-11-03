@@ -4,7 +4,14 @@
 
 import type { GameState } from '../core/state';
 import type { Derived } from '../systems/derive';
-import type { PropertyViewLike } from './propertyView';
+export interface PropertyViewLike {
+  kind: 'three' | 'iso';
+  show(parcelId: string): void;
+  hide(): void;
+  setXray(v: boolean): void;
+  update(): void;
+  resize(): void;
+}
 import { getParcel, PROPERTY_TYPE_INFO, type ParcelDef } from '../world/parcels';
 import { parcelState } from '../systems/property';
 import { stageOf } from '../systems/construction';

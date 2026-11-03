@@ -10,6 +10,7 @@ import { COMPANY_COLORS, COMPANY_LOGOS } from './config/content';
 import { esc, money, duration } from './core/format';
 import { unlockAudio, playSfx } from './audio/sound';
 import { startTitleScene, stopTitleScene } from './ui/titleScene';
+import { applyMode, deviceMode, recommendedMode, rememberedMode, type DeviceMode } from './core/device';
 
 declare const __GAME_VERSION__: string;
 export const GAME_VERSION = typeof __GAME_VERSION__ !== 'undefined' ? __GAME_VERSION__ : 'dev';
@@ -22,6 +23,32 @@ const wizard = { name: 'Nimbus Compute', logo: COMPANY_LOGOS[0], color: COMPANY_
 
 function bootRoot(): HTMLElement {
   return document.getElementById('boot')!;
+}
+
+/** First screen: how are you playing? Sets up the controls, layout and graphics for that device. */
+function deviceScreen() {
+  const rec = recommendedMode();
+  const card = (m: DeviceMode, icon: string, title: string, lines: string[]) => `
+    <button class="device-card ${rec === m ? 'rec' : ''}" data-act="pickDevice" data-v="${m}">
+      ${rec === m ? '<em>Recommended for this device</em>' : ''}
+      <span class="device-ic">${icon}</span>
+      <b>${title}</b>
+      <ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>
+    </button>`;
+  bootRoot().innerHTML = `
+    <canvas id="title-scene"></canvas>
+    <div class="boot-card device-screen">
+      <div class="boot-logo">◢◤</div>
+      <h1>AI DATA CENTER <span>EMPIRE</span></h1>
+      <p class="tag-line">How are you playing today?</p>
+      <div class="device-pick">
+        ${card('pc', '🖥️', 'PC', ['Mouse &amp; keyboard camera', 'Full sidebar and data tables', 'Highest graphics'])}
+        ${card('mobile', '📱', 'Mobile', ['Touch: drag, pinch and twist', 'Bottom tabs and slide-up panels', 'Tuned for speed and battery'])}
+      </div>
+      <label class="check device-remember"><input type="checkbox" id="device-remember"> Remember my choice on this device</label>
+      <p class="boot-foot">Developed by Drone Hive Studios | Developer @ndrone40<br><span class="ver">${GAME_VERSION}</span></p>
+    </div>`;
+  startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
 }
 
 function titleScreen(hasSave: { name: string; level: number; savedAt: number } | null, repaired: string[] = [], error?: string) {
@@ -37,6 +64,7 @@ function titleScreen(hasSave: { name: string; level: number; savedAt: number } |
         ${hasSave ? `<button class="btn primary xl" data-act="bootContinue">Continue — ${esc(hasSave.name)} <small>Level ${hasSave.level} · saved ${duration((Date.now() - hasSave.savedAt) / 1000)} ago</small></button>` : ''}
         <button class="btn ${hasSave ? 'ghost' : 'primary'} xl" data-act="bootNew">New company</button>
         <button class="btn ghost" data-act="bootImport">Import save file</button>
+        <button class="link device-change" data-act="changeDevice">Playing on ${deviceMode() === 'mobile' ? '📱 Mobile' : '🖥️ PC'} · Change</button>
       </div>
       <p class="boot-foot">Single-player · Autosaves locally · Developed by Drone Hive Studios | Developer @ndrone40<br><span class="ver">${GAME_VERSION}</span></p>
     </div>`;
@@ -63,8 +91,18 @@ function wizardScreen() {
 }
 
 let cachedMeta: { name: string; level: number; savedAt: number } | null = null;
+let bootRepaired: string[] = [];
+let bootError: string | undefined;
 
 registerActions({
+  pickDevice: (el) => {
+    const remember = (document.getElementById('device-remember') as HTMLInputElement | null)?.checked ?? false;
+    applyMode(el.dataset.v as DeviceMode, remember);
+    unlockAudio();
+    playSfx('nav');
+    titleScreen(cachedMeta, bootRepaired, bootError);
+  },
+  changeDevice: () => { applyMode(deviceMode(), false); deviceScreen(); },
   bootContinue: async () => {
     unlockAudio();
     playSfx('complete');
@@ -113,7 +151,12 @@ registerChanges({
 async function boot() {
   const r = await loadGame();
   cachedMeta = r.state ? { name: r.state.company.name, level: r.state.level, savedAt: r.state.lastRealTime } : null;
-  titleScreen(cachedMeta, r.state ? r.repaired : [], r.state ? undefined : r.error);
+  bootRepaired = r.state ? r.repaired : [];
+  bootError = r.state ? undefined : r.error;
+  const saved = rememberedMode();
+  applyMode(saved ?? recommendedMode());
+  if (saved) titleScreen(cachedMeta, bootRepaired, bootError);
+  else deviceScreen();
 }
 
 boot().catch((err) => {

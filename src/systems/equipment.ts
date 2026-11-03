@@ -195,14 +195,20 @@ export const SERVER_EQUIPMENT = EQUIPMENT.filter((e) => e.kind === 'server');
 export const INFRA_EQUIPMENT = EQUIPMENT.filter((e) => e.kind === 'infra');
 
 /**
- * One-click auto-equip: fills a facility with a balanced mix of servers within a budget,
- * adding networking, power and cooling infrastructure as needed so nothing overloads.
+ * One-click auto-equip. Fills a facility with a balanced mix of servers within a budget and adds
+ * whatever networking, power and cooling that mix needs, always choosing infrastructure it can
+ * actually afford so the budget isn't swallowed by one substation. A failed run says exactly why.
  */
-export function autoEquip(s: GameState, facilityId: string, budget: number): { ok: boolean; reason?: string; count: number; spent: number } {
+export function autoEquip(s: GameState, facilityId: string, budget: number, opts: { free?: boolean; maxSlots?: number } = {}): { ok: boolean; reason?: string; count: number; spent: number } {
   const f = s.facilities[facilityId];
   if (!f || f.isHQ) return { ok: false, reason: 'Unknown facility', count: 0, spent: 0 };
-  const startCash = s.cash;
+  const realCash = s.cash;
+  if (opts.free) { s.cash = 1e15; budget = Infinity; }
+  // a small percentage of a small balance must still be able to buy the first server
+  else budget = Math.min(Math.max(0, s.cash), Math.max(budget, 70_000));
+  let spent = 0;
   let count = 0;
+  let stop = '';
   const unlocked = (ids: string[]) => ids.filter((id) => equipmentUnlocked(s, equipmentById(id)).ok);
   const gpus = unlocked(['accel_x', 'accel', 'gpu_ent', 'gpu_ai']);
   const cpus = unlocked(['cpu_hd', 'cpu_std']);
@@ -211,26 +217,42 @@ export function autoEquip(s: GameState, facilityId: string, budget: number): { o
   const powers = unlocked(['substation', 'pdu']);
   const cools = unlocked(['liquid', 'cooling_adv', 'cooling_air']);
   const target: Record<string, number> = gpus.length ? { gpu: 0.55, cpu: 0.3, storage: 0.15 } : { gpu: 0, cpu: 0.75, storage: 0.25 };
-  const spentSoFar = () => startCash - s.cash;
-  const tryInstall = (ids: string[]): boolean => {
-    for (const id of ids) {
-      const q = installQuote(s, facilityId, id, 1);
-      if (q.ok && !q.warn && spentSoFar() + q.cost <= budget) {
-        install(s, facilityId, id, 1);
-        count++;
-        return true;
+  const place = (id: string, n: number, der: ReturnType<typeof deriveAll>): boolean => {
+    const q = installQuote(s, facilityId, id, n, der);
+    if (!q.ok || spent + q.cost > budget) return false;
+    if (opts.free) f.equipment[id] = (f.equipment[id] ?? 0) + n;
+    else { install(s, facilityId, id, n); spent += q.cost; }
+    count += n;
+    return true;
+  };
+  /** Add the most useful infrastructure the budget allows: enough to cover the shortfall if possible, else the best we can afford. */
+  const addInfra = (ids: string[], shortfall: number, der: ReturnType<typeof deriveAll>): boolean => {
+    const key = ids === powers ? 'addPower' : 'addCooling';
+    const options = ids
+      .map((id) => ({ id, add: (equipmentById(id) as any)[key] as number, q: installQuote(s, facilityId, id, 1, der) }))
+      .filter((o) => o.q.ok && spent + o.q.cost <= budget)
+      .sort((a, b) => a.q.cost - b.q.cost);
+    const pick = options.find((o) => o.add >= shortfall) ?? options[options.length - 1];
+    if (pick) return place(pick.id, 1, der);
+    // bays full? swap existing gear for its bigger version instead of giving up
+    if (!opts.free) for (const id of Object.keys(f.equipment)) {
+      if ((equipmentById(id) as any)[key] > 0 && equipmentById(id).upgradeTo) {
+        const uq = upgradeQuote(s, facilityId, id, der);
+        if (uq.ok && spent + uq.cost <= budget && upgradeEquipment(s, facilityId, id).ok) { spent += uq.cost; count++; return true; }
       }
     }
     return false;
   };
-  for (let guard = 0; guard < 600; guard++) {
+  for (let guard = 0; guard < 400; guard++) {
     const der = deriveAll(s);
     const st = der.fac[facilityId];
     if (!st) break;
-    if (st.slotsUsed >= f.slots) break;
-    // network first so new servers aren't bottlenecked
-    if (st.servers + 1 > st.network + 4 && tryInstall(nets)) continue;
-    // pick the server class furthest below its target share
+    const free = f.slots - st.slotsUsed;
+    if (free <= 0) { stop = 'all rack slots are full'; break; }
+    if (opts.maxSlots !== undefined && st.slotsUsed >= opts.maxSlots) break;
+    // install in small batches on huge campuses so it stays instant
+    const batch = Math.max(1, Math.floor(free / 40));
+    if (st.servers + batch > st.network + 4 && free > batch && nets.some((id) => place(id, 1, der))) continue;
     const share: Record<string, number> = { gpu: 0, cpu: 0, storage: 0 };
     let total = 0;
     for (const [id, n] of Object.entries(f.equipment)) {
@@ -241,20 +263,37 @@ export function autoEquip(s: GameState, facilityId: string, budget: number): { o
       .filter((c) => target[c] > 0)
       .sort((a, b) => (share[a] / Math.max(1, total) - target[a]) - (share[b] / Math.max(1, total) - target[b]));
     let placed = false;
+    let blocked = '';
     for (const cap of order) {
       const ids = cap === 'gpu' ? gpus : cap === 'cpu' ? cpus : stores;
-      for (const id of ids) {
-        const e = equipmentById(id);
-        // make room in power / cooling before installing
-        if (st.itLoad + e.power > st.powerCap * 0.98) { if (tryInstall(powers)) { placed = true; break; } continue; }
-        if (st.itLoad + e.power > st.coolingCap * 0.98) { if (tryInstall(cools)) { placed = true; break; } continue; }
-        if (tryInstall([id])) { placed = true; break; }
+      for (let k = 0; k < ids.length && !placed; k++) {
+        const e = equipmentById(ids[k]);
+        const price = installQuote(s, facilityId, e.id, 1, der).cost;
+        // don't blow most of the budget on a single top-end server if cheaper ones exist
+        if (k < ids.length - 1 && price > (budget - spent) * 0.5) continue;
+        const n = Math.max(1, Math.min(batch, Math.floor((budget - spent) / Math.max(1, price))));
+        const load = st.itLoad + e.power * n;
+        if (load > st.powerCap * 0.98) {
+          if (addInfra(powers, load - st.powerCap * 0.98, der)) placed = true;
+          else blocked = 'not enough power capacity (no free infrastructure bay, or too little budget for it)';
+          continue;
+        }
+        if (load > st.coolingCap * 0.98) {
+          // cooling gear itself draws power — make room for it first
+          if (st.itLoad + 18 > st.powerCap && addInfra(powers, 18, der)) placed = true;
+          else if (addInfra(cools, load - st.coolingCap * 0.98, der)) placed = true;
+          else blocked = 'not enough cooling capacity (no free infrastructure bay, or too little budget for it)';
+          continue;
+        }
+        if (place(e.id, n, der)) placed = true;
+        else blocked = 'the budget ran out';
       }
       if (placed) break;
     }
-    if (!placed) break;
+    if (!placed) { stop = blocked || 'the budget ran out'; break; }
   }
-  if (!count) return { ok: false, reason: budget < 20_000 ? 'Budget too small' : 'Nothing more fits (check slots, bays and budget)', count, spent: 0 };
-  toast({ title: 'Auto-equip complete', body: `Installed ${count} items for ${money(spentSoFar())} at ${f.name}.`, kind: 'good', icon: '⚡' });
-  return { ok: true, count, spent: spentSoFar() };
+  if (opts.free) { s.cash = realCash; emit('world'); return { ok: true, count, spent: 0 }; }
+  if (!count) return { ok: false, reason: `Couldn't install anything: ${stop || 'nothing more fits'}.`, count, spent: 0 };
+  toast({ title: 'Auto-equip complete', body: `Installed ${count} items for ${money(spent)} at ${f.name}.${stop && stop !== 'all rack slots are full' ? ` Stopped because ${stop}.` : ''}`, kind: 'good', icon: '⚡' });
+  return { ok: true, count, spent };
 }
