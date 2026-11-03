@@ -73,7 +73,11 @@ function morphChildren(from: Node, to: Node) {
   }
 }
 
+const lastHtml = new WeakMap<HTMLElement, string>();
+
 export function morph(target: HTMLElement, html: string) {
+  if (lastHtml.get(target) === html && target.childNodes.length) return;
+  lastHtml.set(target, html);
   tpl.innerHTML = html;
   morphChildren(target, tpl.content);
 }

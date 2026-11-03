@@ -4,6 +4,8 @@
 import { SAVE_VERSION, defaultSettings, emptyReport, type GameState } from '../core/state';
 import { CITIES } from '../config/world';
 import { ECONOMY } from '../config/economy';
+import { ensureExpansion } from '../systems/expansionState';
+import { fiberLink } from '../config/expansion';
 
 const DB_NAME = 'ai-datacenter-empire';
 const STORE = 'saves';
@@ -176,6 +178,9 @@ export function validate(raw: any): LoadResult {
     if (!Array.isArray(c.history)) c.history = [];
     if (!isNum(c.cash)) c.cash = 1_000_000;
   }
+  ensureExpansion(s);
+  s.fiber.routes = s.fiber.routes.filter((r) => r && fiberLink(r.link) && isNum(r.doneAt) && isNum(r.tier));
+  for (const fac of Object.values(s.facilities)) if (fac.orders && !Array.isArray(fac.orders)) fac.orders = undefined;
   s.version = SAVE_VERSION;
   return { state: s, repaired };
 }
@@ -248,6 +253,32 @@ export async function deleteSaves() {
     localStorage.removeItem(LS_KEY);
     localStorage.removeItem('aidce-meta');
   } catch { /* ignore */ }
+}
+
+// ---- developer backups: separate slots that resets never touch ----
+const BACKUP_META = 'aidce-dev-backups';
+export interface BackupInfo { slot: number; savedAt: number; name: string; level: number; kb: number }
+export function listBackups(): BackupInfo[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(BACKUP_META) ?? '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+export async function writeBackup(s: GameState, slot: number): Promise<boolean> {
+  const text = serialize(s);
+  if (!(await idbPut(`backup-${slot}`, text))) return false;
+  const list = listBackups().filter((b) => b.slot !== slot);
+  list.push({ slot, savedAt: Date.now(), name: s.company.name, level: s.level, kb: Math.round(text.length / 1024) });
+  try { localStorage.setItem(BACKUP_META, JSON.stringify(list.sort((a, b) => a.slot - b.slot))); } catch { /* the backup itself is safe */ }
+  return true;
+}
+export async function readBackup(slot: number): Promise<LoadResult> {
+  const text = await idbGet(`backup-${slot}`);
+  return text ? parse(text) : { state: null, repaired: [], error: 'That backup is empty' };
+}
+export async function deleteBackup(slot: number) {
+  await idbDel(`backup-${slot}`);
+  try { localStorage.setItem(BACKUP_META, JSON.stringify(listBackups().filter((b) => b.slot !== slot))); } catch { /* ignore */ }
 }
 
 export function exportSave(s: GameState) {

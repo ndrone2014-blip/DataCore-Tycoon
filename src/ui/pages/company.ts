@@ -11,7 +11,9 @@ import { blueprintById } from '../../config/buildings';
 import { ACHIEVEMENTS, METRICS, currentStory, missionProgress, claimMission, STORY } from '../../systems/progression';
 import { COMPANY_COLORS, COMPANY_LOGOS } from '../../config/content';
 import { applyMode, deviceMode, type DeviceMode } from '../../core/device';
-import { acquireCompetitor, acquisitionQuote } from '../../systems/competitors';
+import { acquisitionQuote, buySite, dealPausedFor, makeOffer, OFFER_TIERS, offerChance, siteQuote } from '../../systems/competitors';
+import { companyRows } from '../../systems/rankings';
+import { renderDevTools } from './devPanel';
 import { exportSave, importSaveFile, deleteSaves, saveGame } from '../../save/save';
 
 const START = Date.UTC(2027, 0, 1, 8);
@@ -88,19 +90,38 @@ export function renderCompetitors(app: App): string {
   <div class="card">
     <h3>Industry leaderboard</h3>
     <table class="tbl"><thead><tr><th>#</th><th>Company</th><th>Valuation</th><th>Revenue/h</th><th>Profit/h</th><th>Facilities</th><th>Cities</th><th>Compute (CU)</th><th>Tech</th><th></th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr class="${r.id === 'player' ? 'me' : ''}"><td>${i + 1}</td><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b>${r.id === 'player' ? ' <span class="tag ok sm">You</span>' : ''}</td><td>${money(r.valuation)}</td><td>${money(r.revenueHr)}</td><td class="${r.revenueHr - r.expenseHr >= 0 ? 'pos' : 'neg'}">${money(r.revenueHr - r.expenseHr)}</td><td>${r.sites}</td><td>${r.cities}</td><td>${num(r.cu)}</td><td>${r.id === 'player' ? `${r.tech} researched` : `Level ${r.tech}`}</td><td class="row gap">${r.id !== 'player' ? `<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Inspect</button>${(() => { const q = acquisitionQuote(s, r.id); return btn('🤝 Buy', 'buyComp', { id: r.id }, 'primary sm', q.ok ? undefined : q.reason); })()}` : ''}</td></tr>`).join('')}
+    ${rows.map((r, i) => `<tr class="${r.id === 'player' ? 'me' : ''}"><td>${i + 1}</td><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b>${r.id === 'player' ? ' <span class="tag ok sm">You</span>' : ''}</td><td>${money(r.valuation)}</td><td>${money(r.revenueHr)}</td><td class="${r.revenueHr - r.expenseHr >= 0 ? 'pos' : 'neg'}">${money(r.revenueHr - r.expenseHr)}</td><td>${r.sites}</td><td>${r.cities}</td><td>${num(r.cu)}</td><td>${r.id === 'player' ? `${r.tech} researched` : `Level ${r.tech}`}</td><td class="row gap">${r.id !== 'player' ? `<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Inspect</button>` : ''}</td></tr>`).join('')}
     </tbody></table>
   </div>
+  ${marketplace(app)}
   <div class="card mt"><h3>Valuation over time</h3>${labels.length > 1 ? chart('comp-val', { type: 'line', money: true, height: 260, labels, datasets: [{ label: s.company.name, data: tail(s.finance.valuationHistory) as number[], color: s.company.color }, ...s.competitors.map((c) => ({ label: c.name, data: tail(c.history) as number[], color: c.color, dashed: true }))] }) : empty('📈', 'Gathering data', 'History is recorded every game day.')}</div>
   ${sel ? `<div class="card mt comp-detail" style="border-color:${sel.color}">
     <div class="row between"><h2><span class="logo-dot lg" style="background:${sel.color}">${esc(sel.logo)}</span> ${esc(sel.name)}</h2><button class="btn ghost sm" data-act="compSel" data-id="">Close</button></div>
     <p class="muted">${esc(sel.desc)} Strategy: <b>${sel.personality}</b> · Aggression ${sel.aggression.toFixed(1)} · Profit focus ${sel.profitFocus.toFixed(1)} · Tech focus ${sel.techFocus.toFixed(1)} · Frugality ${sel.frugality.toFixed(1)}</p>
     <div class="grid6 mini-stats"><div><label>Valuation</label><b>${money(sel.valuation)}</b></div><div><label>Cash</label><b>${money(sel.cash)}</b></div><div><label>Revenue/h</label><b>${money(sel.revenueHr)}</b></div><div><label>Expenses/h</label><b>${money(sel.expenseHr)}</b></div><div><label>Tech level</label><b>${sel.techLevel}</b></div><div><label>Deals won</label><b>${sel.contractsWon}</b></div></div>
     <p class="small"><b>Latest move:</b> ${esc(sel.lastAction)}</p>
-    ${(() => { const q = acquisitionQuote(s, sel.id); return `<div class="callout acquire"><div><b>Buy ${esc(sel.name)} for ${money(q.price)}</b><br><small>The price is their valuation. You get their ${q.lots} properties, ${q.facilities} running data centers (hardware included) and ${money(q.cashAcquired)} in cash. Half-finished projects are written off, and they leave the market for good.</small></div>${btn('🤝 Buy company', 'buyComp', { id: sel.id }, 'primary', q.ok ? undefined : q.reason)}</div>`; })()}
+    ${(() => { const q = acquisitionQuote(s, sel.id); return `<div class="callout acquire"><div><b>Asking price ${money(q.price)}</b><br><small>You get their ${q.lots} properties, ${q.facilities} running data centers (hardware included), their fiber and ${money(q.cashAcquired)} in cash, and their debts if they have any. Half-finished projects are written off. Integration then costs about 8% of the price over 10 days, with those sites running at 85%.</small></div>${btn('🤝 Make an offer', 'buyComp', { id: sel.id }, 'primary')}</div>`; })()}
     <table class="tbl"><thead><tr><th>Site</th><th>City</th><th>Facility</th><th>Status</th><th>Capacity</th><th></th></tr></thead><tbody>
-    ${sel.sites.map((x) => `<tr><td class="mono">${x.parcelId.toUpperCase()}</td><td>${cityById(x.cityId).name}</td><td>${blueprintById(x.blueprintId).name}</td><td>${x.stage === 'operational' ? '<span class="tag ok">Operational</span>' : `<span class="tag">${x.stage === 'demolish' ? 'Demolishing' : 'Building'} ${pct(x.progress / x.total)}</span>`}</td><td>${bar(x.maxCu ? x.cu / x.maxCu : 0, '', `${num(x.cu)} / ${num(x.maxCu)} CU`)}</td><td><button class="btn ghost sm" data-act="openParcel" data-id="${x.parcelId}">View</button></td></tr>`).join('')}
+    ${sel.sites.map((x) => `<tr><td class="mono">${x.parcelId.toUpperCase()}</td><td>${cityById(x.cityId).name}</td><td>${blueprintById(x.blueprintId).name}</td><td>${x.stage === 'operational' ? '<span class="tag ok">Operational</span>' : `<span class="tag">${x.stage === 'demolish' ? 'Demolishing' : 'Building'} ${pct(x.progress / x.total)}</span>`}</td><td>${bar(x.maxCu ? x.cu / x.maxCu : 0, '', `${num(x.cu)} / ${num(x.maxCu)} CU`)}</td><td class="row gap"><button class="btn ghost sm" data-act="openParcel" data-id="${x.parcelId}">View</button>${x.stage === 'operational' ? (() => { const q = siteQuote(s, sel.id, x.parcelId); return btn(`Buy site ${money(q.price)}`, 'buySite', { id: sel.id, p: x.parcelId }, 'primary sm', q.ok ? undefined : q.reason); })() : ''}</td></tr>`).join('')}
     </tbody></table></div>` : ''}`;
+}
+
+function marketplace(app: App): string {
+  const s = app.s, d = app.d;
+  if (!s.competitors.length) return '';
+  const rows = companyRows(s, d).filter((r) => !r.me).sort((a, b) => a.valuation - b.valuation);
+  const running = s.integrations.filter((x) => x.until > s.gameHours);
+  return `<div class="card mt"><div class="row between wrap"><h3>🤝 Acquisition marketplace</h3><small class="muted">Too big to buy outright? Inspect a rival and buy one of its data centers.</small></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Company</th><th>Valuation</th><th>Revenue/yr</th><th>Profit/yr</th><th>Sites</th><th>Staff</th><th>Share</th><th>Status</th><th>Asking price</th><th></th></tr></thead><tbody>
+    ${rows.map((r) => {
+      const c = s.competitors.find((x) => x.id === r.id)!;
+      const q = acquisitionQuote(s, r.id);
+      const paused = dealPausedFor(s, r.id);
+      const status = paused > 0 ? `<span class="tag">Talks paused ${Math.ceil(paused / 24)}d</span>` : c.cash < 0 || c.revenueHr < c.expenseHr ? '<span class="tag warn">Seeking a buyer</span>' : '<span class="tag ok">Open to offers</span>';
+      return `<tr><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b></td><td>${money(r.valuation)}</td><td>${money(r.revenue)}</td><td class="${r.profit >= 0 ? 'pos' : 'neg'}">${money(r.profit)}</td><td>${r.facilities}</td><td>${num(r.employees)}</td><td>${pct(r.share)}</td><td>${status}</td><td><b>${money(q.price)}</b></td><td class="row gap">${btn('Offer', 'buyComp', { id: r.id }, 'primary sm', paused > 0 ? 'Talks are paused' : undefined)}<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Sites</button></td></tr>`;
+    }).join('')}</tbody></table></div>
+    ${running.length ? `<h4 class="sect">Integrations in progress</h4>${running.map((x) => `<div class="list-row static"><span class="flag">🔧</span><span class="grow"><b>${esc(x.name)}</b><small>${money(x.costHr)}/h · ${Math.ceil((x.until - s.gameHours) / 24)} days left</small></span></div>`).join('')}` : ''}
+  </div>`;
 }
 
 export function renderAchievements(app: App): string {
@@ -181,9 +202,10 @@ export function renderSettings(app: App): string {
       <h3 class="mt">⌨️ Shortcuts</h3>
       <div class="kv small"><span>Pause / resume</span><b>Space</b><span>Game speed</span><b>1 · 2 · 3</b><span>World map</span><b>M</b><span>Back / close</span><b>Esc</b><span>Save</span><b>Ctrl+S</b></div>
       <h3 class="mt">ℹ️ About</h3>
-      <p class="small muted">AI Data Center Empire <b>${(window as any).__GAME_VERSION__ ?? ''}</b> · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
+      <p class="small muted">AI Data Center Empire <b data-act="devTap">${(window as any).__GAME_VERSION__ ?? ''}</b> · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
     </div>
-  </div>`;
+  </div>
+  ${renderDevTools(app)}`;
 }
 
 export function companyActions(app: App) {
@@ -192,10 +214,32 @@ export function companyActions(app: App) {
       const id = el.dataset.id!;
       const c = app.s.competitors.find((x) => x.id === id);
       if (!c) return;
-      const q = acquisitionQuote(app.s, id);
-      confirmDialog(`Buy ${esc(c.name)}?`, `Pay <b>${money(q.price)}</b> (their valuation). You receive their ${q.lots} properties, ${q.facilities} data centers and ${money(q.cashAcquired)} of cash. This can't be undone.`, 'Buy company', () => {
-        if (app.run(() => acquireCompetitor(app.s, id))) app.ui.compId = null;
-      });
+      openModal(() => {
+        const s = app.s;
+        const cur = s.competitors.find((x) => x.id === id);
+        if (!cur) return '<p>This company no longer exists.</p>';
+        const base = acquisitionQuote(s, id);
+        const paused = dealPausedFor(s, id);
+        return `<h2>Offer for ${esc(cur.name)}</h2>
+          <p class="muted small">You get ${base.lots} properties, ${base.facilities} data centers and ${money(base.cashAcquired)} in cash${cur.cash < 0 ? `, plus ${money(-cur.cash)} of their debt` : ''}. Integration costs about 8% of the price over 10 days, with those sites at 85% performance. A rejected offer pauses talks for 4 days and raises their asking price by 5%.</p>
+          <div class="offer-tiers">${OFFER_TIERS.map((t) => {
+            const q = acquisitionQuote(s, id, t.mult);
+            const chance = offerChance(s, cur, t.id);
+            return `<div class="opt-card"><div class="opt-title"><b>${t.label}</b></div><div class="big-num">${money(q.price)}</div><small class="muted">${Math.round(chance * 100)}% chance they accept</small>${bar(chance, chance > 0.7 ? 'ok' : chance > 0.35 ? 'warn' : 'bad')}${btn('Make offer', 'sendOffer', { id, t: t.id }, t.id === 'fair' ? 'primary sm' : 'ghost sm', paused > 0 ? 'Talks are paused' : q.ok ? undefined : q.reason)}</div>`;
+          }).join('')}</div>`;
+      }, { wide: true });
+    },
+    sendOffer: (el: HTMLElement) => {
+      const id = el.dataset.id!, tier = el.dataset.t!;
+      let accepted = false;
+      closeModal();
+      const ok = app.run(() => { const r = makeOffer(app.s, id, tier); accepted = !!r.accepted; return r; });
+      if (ok && accepted) app.ui.compId = null;
+    },
+    buySite: (el: HTMLElement) => {
+      const { id, p } = el.dataset as { id: string; p: string };
+      const q = siteQuote(app.s, id, p);
+      confirmDialog('Buy this data center?', `Pay <b>${money(q.price)}</b>. It joins your company with its hardware, and runs at 85% for 5 days while it's integrated.`, 'Buy site', () => app.run(() => buySite(app.s, id, p)));
     },
     finTab: (el: HTMLElement) => { app.ui.financeTab = el.dataset.v; app.render(); },
     loan: (el: HTMLElement) => app.run(() => takeLoan(app.s, app.d, Number(el.dataset.v))),
@@ -211,9 +255,10 @@ export function companyActions(app: App) {
       const r = await importSaveFile();
       if (!r.state) return app.run(() => ({ ok: false, reason: r.error ?? 'Invalid save' }));
       await saveGame(r.state, 'auto');
+      (window as any).__skipUnloadSave = true; // otherwise leaving the page saves the old game back over the import
       location.reload();
     },
-    loadSave: () => confirmDialog('Load last save?', 'Unsaved progress since the last autosave will be lost.', 'Load', () => location.reload()),
+    loadSave: () => confirmDialog('Load last save?', 'Unsaved progress since the last autosave will be lost.', 'Load', () => { (window as any).__skipUnloadSave = true; location.reload(); }),
     newGame: () => confirmDialog('Start a new game?', 'Your current company will be replaced. Export your save first if you want to keep it.', 'New game', async () => {
       await deleteSaves();
       (window as any).__skipUnloadSave = true;

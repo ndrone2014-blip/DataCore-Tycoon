@@ -5,7 +5,9 @@ export type EffectKey =
   | 'coolingCap' | 'powerCap' | 'pue'
   | 'electricityCost' | 'maint' | 'decay' | 'perf' | 'incidents'
   | 'offlineHours' | 'constructionSpeed' | 'contractRate' | 'offerRate'
-  | 'connectivity' | 'researchSpeed' | 'networkCap' | 'buildCost' | 'equipCost';
+  | 'connectivity' | 'researchSpeed' | 'networkCap' | 'buildCost' | 'equipCost'
+  // company policies
+  | 'gpuRate' | 'cpuRate' | 'storageRate' | 'opex' | 'salaryCost' | 'licenseCost' | 'fiberCost' | 'repBase' | 'rndBudget' | 'specBoost';
 
 export type Effects = Partial<Record<EffectKey, number>>;
 
@@ -52,4 +54,5 @@ export const RESEARCH: ResearchDef[] = [
   { id: 'robotics', name: 'Datacenter Robotics', category: 'Automation', tier: 4, cost: 50_000_000, seconds: 800, requires: ['monitor', 'prefab'], level: 28, effects: { maint: 0.25, constructionSpeed: 0.35, offlineHours: 8 }, desc: 'Robots swap drives and racks. −25% maintenance, +8h offline.' },
 ];
 
-export const researchById = (id: string) => RESEARCH.find((r) => r.id === id)!;
+const RESEARCH_MAP = new Map(RESEARCH.map((r) => [r.id, r]));
+export const researchById = (id: string) => RESEARCH_MAP.get(id)!;

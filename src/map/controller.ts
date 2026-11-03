@@ -16,6 +16,7 @@ import { loadMapLibre, loadWorldGeo, fetchJson, CDN } from '../lib/loader';
 import { allCityscapes } from '../world/cityscape';
 import { emit, toast } from '../core/bus';
 import { esc } from '../core/format';
+import { fiberGeo } from '../systems/fiber';
 
 export type MapLevel = 'world' | 'country' | 'city' | 'property';
 
@@ -44,6 +45,7 @@ export class MapController {
   private markers = new Map<string, { h: MarkerHandle; cityId?: string }>();
   private lastZoomBand = '';
   private refreshPending = false;
+  private fiberSig = '';
   /** True when the WebGL street-level view handles city and property levels. */
   cityMode = false;
   /** Street view already on screen for this city: no need to move the map underneath it. */
@@ -261,6 +263,13 @@ export class MapController {
     if (!this.engine) return;
     this.engine.setCityData(this.buildCityData());
     this.updateMarkers();
+    // only re-send the routes when the network actually changed
+    const s = this.getS();
+    const sig = s.fiber.routes.map((r) => `${r.id}${r.tier}${r.owner}${r.doneAt <= s.gameHours ? 1 : 0}`).join();
+    if (sig !== this.fiberSig) {
+      this.fiberSig = sig;
+      this.engine.setFiber?.(fiberGeo(s));
+    }
   }
 
   private buildCityData(): CityData {
@@ -382,14 +391,16 @@ export class MapController {
       const price = d.cityPrice[city.id] ?? 1;
       const band = this.zoomBand();
       const detail = band === 'country';
-      m.h.el.className = `map-marker city-marker ${unlocked ? 'unlocked' : 'locked'} ${mine ? 'mine' : ''} ${detail ? 'detail' : ''} ${band === 'world' && !unlocked ? 'nolabel' : ''}`;
-      m.h.el.innerHTML = `
+      const cls = `map-marker city-marker ${unlocked ? 'unlocked' : 'locked'} ${mine ? 'mine' : ''} ${detail ? 'detail' : ''} ${band === 'world' && !unlocked ? 'nolabel' : ''}`;
+      if (m.h.el.className !== cls) m.h.el.className = cls;
+      const html = `
         <div class="cm-pin">${unlocked ? (mine ? mine : '◉') : '🔒'}</div>
         <div class="cm-label">
           <b>${esc(city.name)}</b>
           ${detail ? `<small>${unlocked ? `${mine} DCs${building ? ` · ${building} building` : ''} · $${city.powerPrice.toFixed(2)}/kWh · market ${Math.round(price * 100)}%` : `Level ${city.unlockLevel} · license $${(city.license / 1e6).toFixed(1)}M`}</small>` : ''}
           ${comps.length ? `<span class="cm-comps">${comps.map((c) => `<i style="background:${c.color}" title="${esc(c.name)}"></i>`).join('')}</span>` : ''}
         </div>`;
+      if (m.h.el.dataset.h !== html) { m.h.el.innerHTML = html; m.h.el.dataset.h = html; }
     }
     const hq = this.markers.get('hq');
     if (hq) {

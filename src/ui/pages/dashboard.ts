@@ -5,7 +5,8 @@ import { money, num, pct, esc, area, gameDate, gameDuration } from '../../core/f
 import { stat, empty, btn } from '../components';
 import { chart } from '../charts';
 import { projectCard } from './shared';
-import { getParcel, allParcels, PROPERTY_TYPE_INFO } from '../../world/parcels';
+import { getParcel, allParcels, PROPERTY_TYPE_INFO, type ParcelDef } from '../../world/parcels';
+import { on } from '../../core/bus';
 import { parcelState } from '../../systems/property';
 import { landValue } from '../../systems/derive';
 import { cityById, CITIES } from '../../config/world';
@@ -36,7 +37,7 @@ export function renderDashboard(app: App): string {
     ${stat('Expenses / hour', money(t.expenseHr), `Total ${money(s.finance.totalExpenses)}`)}
     ${stat('Net profit / hour', `<span class="${t.profitHr >= 0 ? 'pos' : 'neg'}">${money(t.profitHr)}</span>`, `Margin ${t.revenueHr ? pct(t.profitHr / t.revenueHr) : '—'}`)}
     ${stat('Company valuation', money(t.valuation), `Rank #${1 + s.competitors.filter((c) => c.valuation > t.valuation).length} of ${s.competitors.length + 1}`)}
-    ${stat('Company level', `${s.level}`, `${Math.round(s.xp).toLocaleString()} XP`)}
+    ${stat('Reputation', `${s.company.reputation.toFixed(0)}`, `Level ${s.level} · ${Math.round(s.xp).toLocaleString()} XP`)}
     ${stat('Properties', `${t.properties}`, `${t.cities} cities · ${t.countries} countries`)}
     ${stat('Operational DCs', `${t.facilities}`, `${projects.length} active project${projects.length === 1 ? '' : 's'}`)}
   </div>
@@ -58,7 +59,7 @@ export function renderDashboard(app: App): string {
       ${s.buffs?.length ? `<h3 class="mt">Active boosts</h3>${s.buffs.map((b) => `<div class="event ${b.value >= 0 ? 'good' : 'bad'}"><b>${b.value >= 0 ? '✨' : '⏳'} ${esc(b.label)}</b><small>${gameDuration(b.endsAt - s.gameHours)} left</small></div>`).join('')}` : ''}
       <h3 class="mt">World events</h3>
       ${s.events.length ? s.events.map((e) => {
-        const tx = eventText(e.defId, e.cityId);
+        const tx = eventText(e.defId, e.cityId, e);
         return `<div class="event ${tx.good ? 'good' : 'bad'}"><b>${tx.good ? '📣' : '⚠️'} ${esc(tx.title)}</b><small>${esc(tx.desc)} · ${gameDuration(e.endsAt - s.gameHours)} left</small></div>`;
       }).join('') : '<p class="muted small">Markets are calm.</p>'}
       ${warnings.length ? `<h3 class="mt">Facility alerts</h3>${warnings.map((f) => `<button class="list-row" data-act="manageDC" data-id="${f.id}"><span class="flag">⚠️</span><span class="grow"><b>${esc(f.name)}</b><small>${esc(d.fac[f.id].warnings.join(' · '))}</small></span></button>`).join('')}` : ''}
@@ -70,11 +71,19 @@ export function renderDashboard(app: App): string {
       ${projects.length ? projects.slice(0, 3).map((p) => projectCard(app, p, true)).join('') : empty('🏗️', 'No active projects', 'Buy land on the World Map, demolish, and build a data center.', `<button class="btn primary" data-act="nav" data-page="map">Open World Map</button>`)}
     </div>
     <div class="card">
-      <h3>Recent activity</h3>
+      <div class="row between"><h3>Industry news</h3><button class="link" data-act="openNews">View all</button></div>
+      ${(s.news ?? []).slice(0, 4).map((n) => `<div class="news ${n.kind} compact"><small>${gameDate(Date.UTC(2027, 0, 1, 8), n.t)} · ${esc(n.tag)}</small><b>${esc(n.title)}</b></div>`).join('') || '<p class="muted small">No headlines yet.</p>'}
+      <h3 class="mt">Recent activity</h3>
       <div class="log">${s.log.slice(0, 14).map((l) => `<div class="log-row ${l.kind}"><small>${gameDate(Date.UTC(2027, 0, 1, 8), l.t)}</small><span>${esc(l.msg)}</span></div>`).join('')}</div>
     </div>
   </div>`;
 }
+
+// Sorting ~6,900 parcels on every UI refresh was the slowest thing on any page, so the result is
+// kept until land changes hands, a filter changes or a game day passes (prices drift daily).
+let worldRev = 0;
+on('world', () => { worldRev++; });
+let oppCache: { key: string; list: { p: ParcelDef; price: number }[] } | null = null;
 
 export function renderRealEstate(app: App): string {
   const s = app.s;
@@ -82,15 +91,19 @@ export function renderRealEstate(app: App): string {
   const city = app.ui.reCity as string;
   const type = app.ui.reType as string;
   const maxPrice = Number(app.ui.reMax ?? 0);
-  let opps = allParcels()
-    .filter((p) => s.unlockedCities.includes(p.cityId) && !parcelState(s, p.id).owner)
-    .filter((p) => (city === 'all' || p.cityId === city) && (type === 'all' || p.type === type))
-    .map((p) => ({ p, price: landValue(s, p.id) }))
-    .filter((x) => !maxPrice || x.price <= maxPrice);
   const sort = app.ui.reSort;
-  opps.sort((a, b) => (sort === 'area' ? b.p.area - a.p.area : sort === 'ppm' ? a.price / a.p.area - b.price / b.p.area : a.price - b.price));
-  const total = opps.length;
-  opps = opps.slice(0, 60);
+  const oppKey = `${worldRev}|${city}|${type}|${maxPrice}|${sort}|${s.unlockedCities.length}|${Math.floor(s.gameHours / 24)}`;
+  if (oppCache?.key !== oppKey) {
+    const list = allParcels()
+      .filter((p) => s.unlockedCities.includes(p.cityId) && !parcelState(s, p.id).owner)
+      .filter((p) => (city === 'all' || p.cityId === city) && (type === 'all' || p.type === type))
+      .map((p) => ({ p, price: landValue(s, p.id) }))
+      .filter((x) => !maxPrice || x.price <= maxPrice);
+    list.sort((a, b) => (sort === 'area' ? b.p.area - a.p.area : sort === 'ppm' ? a.price / a.p.area - b.price / b.p.area : a.price - b.price));
+    oppCache = { key: oppKey, list };
+  }
+  const total = oppCache.list.length;
+  const opps = oppCache.list.slice(0, 60).filter((x) => !parcelState(s, x.p.id).owner);
   const value = owned.reduce((a, [pid]) => a + landValue(s, pid), 0);
   return `
   <div class="grid4">

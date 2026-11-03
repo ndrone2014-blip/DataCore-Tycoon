@@ -3,7 +3,7 @@
 import type { App } from '../app';
 import { CITIES, COUNTRIES, cityById, countryById, citiesInCountry } from '../../config/world';
 import { getCityLayout, getParcel, getZone, PROPERTY_TYPE_INFO, type ParcelDef } from '../../world/parcels';
-import { parcelState, canBuy, demolitionCost, demolitionSeconds, zoneQuote, consolidateQuote, buyParcel, buyZone, startDemolition, sellParcel, consolidateZone, unlockCity, canSell } from '../../systems/property';
+import { parcelState, canBuy, demolitionCost, demolitionSeconds, zoneQuote, consolidateQuote, licenseFee, buyParcel, buyZone, startDemolition, sellParcel, consolidateZone, unlockCity, canSell } from '../../systems/property';
 import { landValue } from '../../systems/derive';
 import { quoteBuild, hqQuote, startHQ, speedUp } from '../../systems/construction';
 import { hqUpgradeQuote, upgradeHQ } from '../../systems/equipment';
@@ -15,6 +15,8 @@ import { dcNeed, projectCard } from './shared';
 import { openBuildModal } from './buildModal';
 import { staffCap } from '../../systems/employees';
 import { isMobile } from '../../core/device';
+import { COUNTRY_RULES, citySpecById } from '../../config/expansion';
+import { cityMods } from '../../systems/regulation';
 
 export function renderMapPanel(app: App): string {
   const m = app.map;
@@ -33,7 +35,7 @@ function cityRow(app: App, id: string): string {
   const comps = s.competitors.filter((x) => x.sites.some((y) => y.cityId === id));
   return `<button class="list-row ${unlocked ? '' : 'locked'}" data-act="mapCity" data-id="${id}">
     <span class="flag">${countryById(c.country).flag}</span>
-    <span class="grow"><b>${esc(c.name)}</b><small>${unlocked ? `${mine} facilities · market ${Math.round((app.d.cityPrice[id] ?? 1) * 100)}%` : `🔒 Level ${c.unlockLevel}${c.license ? ` · ${money(c.license)}` : ''}`}</small></span>
+    <span class="grow"><b>${esc(c.name)}</b><small>${unlocked ? `${mine} facilities · market ${Math.round((app.d.cityPrice[id] ?? 1) * 100)}%` : `🔒 Level ${c.unlockLevel}${c.license ? ` · ${money(licenseFee(app.s, c.id))}` : ''}`}</small></span>
     <span class="dots">${comps.map((x) => `<i style="background:${x.color}" title="${esc(x.name)}"></i>`).join('')}</span>
   </button>`;
 }
@@ -50,8 +52,8 @@ function marketsCard(app: App): string {
     <p class="small muted">Each city needs your company to reach a <b>level</b>, then a one-time <b>market license</b>. Earn levels from building, contracts and missions. You are level ${s.level}.</p>
     ${[...ready, ...next].map((c) => {
       const lvlOk = s.level >= c.unlockLevel;
-      return `<div class="market-row"><span class="flag">${countryById(c.country).flag}</span><span class="grow"><b>${esc(c.name)}</b><small>Level ${c.unlockLevel}${c.license ? ` · ${money(c.license)} license` : ' · free'}</small></span>
-        ${lvlOk ? btn('Unlock', 'unlockCity', { id: c.id }, 'primary sm', s.cash < c.license ? `Need ${money(c.license)}` : undefined) : `<span class="tag">Lv ${c.unlockLevel}</span>`}</div>`;
+      return `<div class="market-row"><span class="flag">${countryById(c.country).flag}</span><span class="grow"><b>${esc(c.name)}</b><small>Level ${c.unlockLevel}${c.license ? ` · ${money(licenseFee(app.s, c.id))} license` : ' · free'}</small></span>
+        ${lvlOk ? btn('Unlock', 'unlockCity', { id: c.id }, 'primary sm', s.cash < licenseFee(s, c.id) ? `Need ${money(licenseFee(app.s, c.id))}` : undefined) : `<span class="tag">Lv ${c.unlockLevel}</span>`}</div>`;
     }).join('')}
   </div>`;
 }
@@ -102,12 +104,15 @@ function countryPanel(app: App, id: string): string {
           <span>Construction cost</span><b>${pct(city.constructionMult)}</b>
           <span>Property tax</span><b>${(city.tax * 100).toFixed(1)}%</b>
           <span>Grid reliability</span><b>${pct(city.grid)}</b>
+          <span>Country rules</span><b title="${esc(COUNTRY_RULES[city.country]?.note ?? '')}">${esc(COUNTRY_RULES[city.country]?.label ?? '—')}</b>
+          <span>Permits</span><b>${pct(cityMods(s, city.id).permitCost)} cost · ${pct(cityMods(s, city.id).permitTime)} time</b>
+          <span>PUE limit</span><b>${cityMods(s, city.id).pueLimit >= 9 ? 'None' : cityMods(s, city.id).pueLimit.toFixed(2)}</b>
           <span>Market saturation</span><b>${pct(supply / demand)}</b>
           <span>Spot price</span><b>${pct(app.d.cityPrice[city.id] ?? 1)}</b>
         </div>
         <div class="row gap mt">
           <button class="btn primary sm" data-act="mapCity" data-id="${city.id}">View city</button>
-          ${unlocked ? '' : btn(`Unlock ${city.license ? money(city.license) : ''}`, 'unlockCity', { id: city.id }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < city.license ? `Need ${money(city.license)}` : undefined)}
+          ${unlocked ? '' : btn(`Unlock ${city.license ? money(licenseFee(app.s, city.id)) : ''}`, 'unlockCity', { id: city.id }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < licenseFee(app.s, city.id) ? `Need ${money(licenseFee(app.s, city.id))}` : undefined)}
         </div>
       </div>`;
     }).join('')}`;
@@ -127,9 +132,12 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
     .slice(0, 10);
   const mine = Object.entries(s.parcels).filter(([pid, ps]) => ps.owner === 'player' && !ps.mergedInto && getParcel(pid)?.cityId === cityId);
   const zone = zoneId ? getZone(zoneId) : undefined;
+  const rule = COUNTRY_RULES[city.country], mods = cityMods(s, cityId), spec = s.citySpec[cityId] ? citySpecById(s.citySpec[cityId].spec) : undefined;
+  const rulesCard = `<div class="callout small rules-card"><b>🏛️ ${esc(rule?.label ?? 'Local rules')}</b>${spec ? ` · ${spec.icon} ${esc(spec.name)}` : ''}<br><small>${esc(rule?.note ?? '')} Tax ${pct(mods.taxMult)} · permits ${pct(mods.permitCost)} cost, ${pct(mods.permitTime)} time · PUE limit ${mods.pueLimit >= 9 ? 'none' : mods.pueLimit.toFixed(2)}${mods.privacyTier ? ` · privacy tier ${mods.privacyTier}` : ''}.</small></div>`;
   return `
     <div class="panel-head"><h2>${countryById(city.country).flag} ${esc(city.name)}</h2><p class="muted">${esc(city.districtName)} · ${lay.parcels.length} parcels · ${lay.zones.length} development zones</p></div>
-    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${s.level < city.unlockLevel ? `Reach company level ${city.unlockLevel} (you are level ${s.level}), then buy the market license.` : 'Buy the market license to start building here.'} ${btn(`Buy market license ${money(city.license)}`, 'unlockCity', { id: cityId }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < city.license ? `Need ${money(city.license)}` : undefined)}</div>`}
+    ${rulesCard}
+    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${s.level < city.unlockLevel ? `Reach company level ${city.unlockLevel} (you are level ${s.level}), then buy the market license.` : 'Buy the market license to start building here.'} ${btn(`Buy market license ${money(licenseFee(app.s, city.id))}`, 'unlockCity', { id: cityId }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < licenseFee(app.s, city.id) ? `Need ${money(licenseFee(app.s, city.id))}` : undefined)}</div>`}
     <div class="card">
       <div class="row between"><b>Market</b><small class="muted">Spot price ${pct(d.cityPrice[cityId] ?? 1)}</small></div>
       ${bar(Math.min(1, supply / demand), supply / demand > 0.9 ? 'warn' : '', `Supply ${num(supply)} / demand ${num(demand)} CU`)}

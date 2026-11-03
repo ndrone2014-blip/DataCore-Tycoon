@@ -16,6 +16,10 @@ import { canAfford, log, spend } from './ledger';
 import { rand, randRange, pick } from '../core/rng';
 import { emit, sfx, toast } from '../core/bus';
 import { money } from '../core/format';
+import { pushNews } from './ledger';
+import { generateOffer } from './contracts';
+import { deriveAll } from './derive';
+import { rivalFiber } from './fiber';
 
 const cuPerSlot = (tech: number) => 40 * Math.pow(1.35, tech);
 const costPerCu = (tech: number) => 430 / (1 + tech * 0.08);
@@ -81,16 +85,56 @@ function allowedCities(s: GameState, c: Competitor): CityDef[] {
   return CITIES.filter((x) => x.unlockLevel <= reach);
 }
 
+/** Hardware market conditions hit rivals through the same events that hit the player. */
+function rivalEquipMult(s: GameState): number {
+  let m = 1;
+  for (const e of s.events) {
+    if (e.defId === 'gpu_shortage') m *= 1.2;
+    else if (e.defId === 'chip_sale') m *= 0.8;
+    else if (e.defId === 'chip_breakthrough') m *= 0.9;
+    else if (e.defId === 'supply_crunch') m *= 1.08;
+    else if (e.defId === 'trade_dispute') m *= 1.05;
+  }
+  return m;
+}
+
+/** Big rivals swallow small ones, so the industry consolidates even if the player never buys anyone. */
+function rivalMerger(s: GameState, c: Competitor): boolean {
+  // leave the player time to make the first move, and don't let the whole industry vanish at once
+  if (s.competitors.length <= 3 || s.gameHours < 2500 || s.gameHours - (s.stats.lastRivalMerger ?? -1e9) < 1500) return false;
+  const targets = s.competitors.filter((t) => t.id !== c.id && t.valuation < c.valuation * 0.45);
+  if (!targets.length) return false;
+  const t = targets.sort((a, b) => b.valuation - a.valuation)[0];
+  // mostly paid in shares: the buyer spends part of its cash and takes on the target's books
+  const price = t.valuation * 1.15;
+  c.cash += t.cash - Math.min(c.cash * 0.3, price * 0.25);
+  c.sites.push(...t.sites);
+  c.contractsWon += t.contractsWon;
+  for (const ps of Object.values(s.parcels)) if (ps.owner === t.id) ps.owner = c.id;
+  for (const r of s.fiber.routes) if (r.owner === t.id) r.owner = c.id;
+  s.fiber.routes = s.fiber.routes.filter((r, i, all) => r.owner === 'player' || all.findIndex((q) => q.link === r.link && q.owner === r.owner) === i);
+  s.competitors = s.competitors.filter((x) => x.id !== t.id);
+  s.stats.lastRivalMerger = s.gameHours;
+  c.lastAction = `Acquired ${t.name}`;
+  log(s, `${c.name} acquired ${t.name} in a ${money(price)} deal`, 'comp');
+  toast({ title: 'Industry consolidation', body: `${c.name} just bought ${t.name}.`, kind: 'warn', icon: c.logo });
+  emit('world');
+  return true;
+}
+
 function think(s: GameState, c: Competitor, der: Derived) {
+  if (rand() < 0.03 * c.aggression && rivalMerger(s, c)) return;
+  if (rand() < 0.05 * c.aggression) rivalFiber(s, c);
+  const equipK = rivalEquipMult(s);
   const opCu = c.sites.reduce((a, x) => a + (x.stage === 'operational' ? x.cu : 0), 0);
   // 1) fill existing sites with capacity
   for (const site of c.sites) {
     if (site.stage !== 'operational' || site.cu >= site.maxCu) continue;
     if ((der.cityPrice[site.cityId] ?? 1) < 0.55) continue; // don't flood a saturated market
     const budget = c.cash * 0.35 * c.aggression;
-    const add = Math.min(site.maxCu - site.cu, budget / costPerCu(c.techLevel));
+    const add = Math.min(site.maxCu - site.cu, budget / (costPerCu(c.techLevel) * equipK));
     if (add > 5) {
-      const cost = add * costPerCu(c.techLevel);
+      const cost = add * costPerCu(c.techLevel) * equipK;
       c.cash -= cost;
       site.cu += add;
       site.invested += cost;
@@ -177,6 +221,17 @@ function startSite(s: GameState, c: Competitor, parcelId: string, city: CityDef,
   if (rand() < 0.5 || s.unlockedCities.includes(city.id)) log(s, `${c.name} started a ${bp.name} in ${city.name}`, 'comp');
 }
 
+/** Gives a rival a running data center on a free lot in this city. */
+export function addCompetitorSite(s: GameState, c: Competitor, cityId: string): boolean {
+  const p = choosePlot(s, c, cityById(cityId), 1500, 9000);
+  if (!p) return false;
+  const bp = BLUEPRINTS[p.area > 2600 ? 2 : 1];
+  const maxCu = bp.slots * cuPerSlot(c.techLevel);
+  claim(s, c, p.id, 'facility');
+  c.sites.push({ parcelId: p.id, cityId, stage: 'operational', progress: 1, total: 1, cu: maxCu * 0.5, maxCu, blueprintId: bp.id, invested: bp.cost + landValue(s, p.id) });
+  return true;
+}
+
 export function tickCompetitors(s: GameState, dt: number, realDt: number, der: Derived) {
   const dayBefore = Math.floor((s.gameHours - dt) / 24);
   const dayNow = Math.floor(s.gameHours / 24);
@@ -210,6 +265,7 @@ export function tickCompetitors(s: GameState, dt: number, realDt: number, der: D
       rev += site.cu * util * (der.cityPrice[site.cityId] ?? 1) * (1 + c.techLevel * 0.04);
       cu += site.cu;
     }
+    rev += der.net.rivalTransit[c.id] ?? 0;
     const exp = (cu * 0.07 * (1 - (c.frugality - 1) * 0.15)) / (1 + c.techLevel * 0.12) + c.sites.length * 60;
     c.revenueHr = rev;
     c.expenseHr = exp;
@@ -234,11 +290,12 @@ export function tickCompetitors(s: GameState, dt: number, realDt: number, der: D
 }
 
 /** What it costs to buy a rival outright: their valuation (paying for their cash means you also receive it). */
-export function acquisitionQuote(s: GameState, compId: string): { ok: boolean; reason?: string; price: number; cashAcquired: number; facilities: number; lots: number } {
+export function acquisitionQuote(s: GameState, compId: string, priceMult = 1): { ok: boolean; reason?: string; price: number; cashAcquired: number; facilities: number; lots: number } {
   const c = s.competitors.find((x) => x.id === compId);
   if (!c) return { ok: false, reason: 'Company no longer exists', price: 0, cashAcquired: 0, facilities: 0, lots: 0 };
-  const price = Math.round(c.valuation);
-  const lots = Object.values(s.parcels).filter((p) => p.owner === c.id).length;
+  const price = Math.round(c.valuation * (c.askMult ?? 1) * priceMult);
+  let lots = 0;
+  for (const id in s.parcels) if (s.parcels[id].owner === c.id) lots++;
   const facilities = c.sites.filter((x) => x.stage === 'operational').length;
   const cashAcquired = Math.max(0, Math.round(c.cash));
   if (!canAfford(s, price)) return { ok: false, reason: `Need ${money(price)} in cash`, price, cashAcquired, facilities, lots };
@@ -246,14 +303,16 @@ export function acquisitionQuote(s: GameState, compId: string): { ok: boolean; r
 }
 
 /** Buy a rival: their land and running data centers become yours, their projects stop, and they leave the market. */
-export function acquireCompetitor(s: GameState, compId: string): { ok: boolean; reason?: string } {
-  const q = acquisitionQuote(s, compId);
+export function acquireCompetitor(s: GameState, compId: string, priceMult = 1): { ok: boolean; reason?: string } {
+  const q = acquisitionQuote(s, compId, priceMult);
   if (!q.ok) return { ok: false, reason: q.reason };
   const c = s.competitors.find((x) => x.id === compId)!;
   spend(s, q.price, 'Acquisitions', `Acquired ${c.name}`);
   // their cash comes with the company (not counted as operating revenue)
   s.cash += q.cashAcquired;
   s.finance.ledger.unshift({ t: s.gameHours, amount: q.cashAcquired, cat: 'Acquisitions', desc: `Cash on ${c.name}'s balance sheet` });
+  // their debts come with them too
+  if (c.cash < 0) s.debt += Math.round(-c.cash);
   const siteByParcel = new Map(c.sites.map((x) => [x.parcelId, x]));
   const newFacilities: { id: string; fill: number; slots: number }[] = [];
   for (const [pid, ps] of Object.entries(s.parcels)) {
@@ -272,7 +331,7 @@ export function acquireCompetitor(s: GameState, compId: string): { ok: boolean; 
         id: fid, parcelId: pid, cityId: site.cityId, name: `${bp.name} (ex-${c.name})`, blueprintId: bp.id,
         slots: bp.slots, bays: bp.bays, basePower: bp.power, baseCooling: bp.cooling, floors: bp.floors, style: 'concrete', color: s.company.color,
         footprint: bp.footprint, equipment: {}, condition: 90, builtAt: s.gameHours, buildCost: bp.cost, shellValue: bp.cost * 0.72,
-        equipmentSpent: 0, revenueTotal: 0, profitTotal: 0,
+        equipmentSpent: 0, revenueTotal: 0, profitTotal: 0, integrateUntil: s.gameHours + INTEGRATION_HOURS,
       };
       ps.status = 'facility';
       ps.facilityId = fid;
@@ -285,8 +344,102 @@ export function acquireCompetitor(s: GameState, compId: string): { ok: boolean; 
   // their hardware comes along, roughly as full as it was, using gear you've unlocked
   for (const nf of newFacilities) autoEquip(s, nf.id, Infinity, { free: true, maxSlots: Math.round(nf.slots * Math.min(1, nf.fill)) });
   s.stats.acquisitions = (s.stats.acquisitions ?? 0) + 1;
+  // A takeover isn't instantly profitable: merging systems and staff costs money for weeks,
+  // and the acquired sites run below par until it's done.
+  s.integrations.push({ name: c.name, until: s.gameHours + INTEGRATION_HOURS, costHr: (q.price * INTEGRATION_SHARE) / INTEGRATION_HOURS });
+  for (const r of s.fiber.routes) if (r.owner === c.id) r.owner = 'player';
+  s.fiber.routes = s.fiber.routes.filter((r, i, all) => r.owner !== 'player' || all.findIndex((q2) => q2.link === r.link && q2.owner === 'player') === i);
+  // some of their customers will talk to you
+  const der = deriveAll(s);
+  for (let i = 0; i < 2 && s.contracts.offers.length < ECONOMY.maxOpenOffers; i++) s.contracts.offers.push(generateOffer(s, der));
+  pushNews(s, `${s.company.name} acquires ${c.name}`, `${money(q.price)} deal. ${q.facilities} data centers change hands.`, 'good', 'Deals');
   log(s, `Acquired ${c.name} for ${money(q.price)}: ${q.lots} properties and ${q.facilities} data centers joined the company`, 'good');
   toast({ title: `${c.name} acquired!`, body: `${q.lots} properties and ${q.facilities} data centers are now yours.${s.competitors.length ? '' : ' You have no rivals left.'}`, kind: 'achievement', icon: '🤝' });
+  sfx('levelup');
+  emit('world');
+  return { ok: true };
+}
+
+const INTEGRATION_HOURS = 240;
+const INTEGRATION_SHARE = 0.08;
+
+export const OFFER_TIERS = [
+  { id: 'low', label: 'Lowball offer', mult: 0.85, base: 0.2 },
+  { id: 'fair', label: 'Fair offer', mult: 1, base: 0.6 },
+  { id: 'premium', label: 'Premium offer', mult: 1.2, base: 1 },
+] as const;
+
+/** How likely their board is to say yes. Distressed companies are easier to buy, and so is a well-regarded buyer. */
+export function offerChance(s: GameState, c: Competitor, tierId: string): number {
+  const tier = OFFER_TIERS.find((t) => t.id === tierId)!;
+  let p: number = tier.base + (s.company.reputation - 50) / 200;
+  if (c.cash < 0) p += 0.3;
+  if (c.revenueHr < c.expenseHr) p += 0.2;
+  if (c.aggression > 1.3) p -= 0.1;
+  return tier.id === 'premium' ? 1 : Math.max(0.03, Math.min(0.97, p));
+}
+
+export const dealPausedFor = (s: GameState, compId: string) => Math.max(0, (s.dealCooldown[compId] ?? 0) - s.gameHours);
+
+/** Make a takeover offer. A rejected offer pauses talks and makes them ask for more next time. */
+export function makeOffer(s: GameState, compId: string, tierId: string): { ok: boolean; reason?: string; accepted?: boolean } {
+  const c = s.competitors.find((x) => x.id === compId);
+  const tier = OFFER_TIERS.find((t) => t.id === tierId);
+  if (!c || !tier) return { ok: false, reason: 'Company no longer exists' };
+  if (dealPausedFor(s, compId) > 0) return { ok: false, reason: `Talks are paused for ${Math.ceil(dealPausedFor(s, compId) / 24)} days` };
+  const q = acquisitionQuote(s, compId, tier.mult);
+  if (!q.ok) return { ok: false, reason: q.reason };
+  if (rand() > offerChance(s, c, tierId)) {
+    s.dealCooldown[compId] = s.gameHours + 96;
+    c.askMult = Math.min(1.5, (c.askMult ?? 1) + 0.05);
+    log(s, `${c.name}'s board rejected your ${money(q.price)} offer`, 'bad');
+    toast({ title: 'Offer rejected', body: `${c.name} turned you down and will ask for more next time.`, kind: 'bad', icon: '🚫' });
+    sfx('error');
+    emit('world');
+    return { ok: true, accepted: false };
+  }
+  const r = acquireCompetitor(s, compId, tier.mult);
+  return { ...r, accepted: r.ok };
+}
+
+export function siteQuote(s: GameState, compId: string, parcelId: string): { ok: boolean; reason?: string; price: number } {
+  const c = s.competitors.find((x) => x.id === compId);
+  const site = c?.sites.find((x) => x.parcelId === parcelId);
+  if (!c || !site) return { ok: false, reason: 'Site no longer available', price: 0 };
+  const price = Math.round((site.invested * 1.25) / 1000) * 1000;
+  if (site.stage !== 'operational') return { ok: false, reason: 'Still under construction', price };
+  if (c.sites.filter((x) => x.stage === 'operational').length < 2) return { ok: false, reason: 'Their last site: buy the whole company instead', price };
+  if (dealPausedFor(s, compId) > 0) return { ok: false, reason: `Talks are paused for ${Math.ceil(dealPausedFor(s, compId) / 24)} days`, price };
+  if (!canAfford(s, price)) return { ok: false, reason: `Need ${money(price)}`, price };
+  return { ok: true, price };
+}
+
+/** Buy a single running data center out of a rival's portfolio. */
+export function buySite(s: GameState, compId: string, parcelId: string): { ok: boolean; reason?: string } {
+  const q = siteQuote(s, compId, parcelId);
+  if (!q.ok) return q;
+  const c = s.competitors.find((x) => x.id === compId)!;
+  const site = c.sites.find((x) => x.parcelId === parcelId)!;
+  const bp = BLUEPRINTS.find((b) => b.id === site.blueprintId)!;
+  spend(s, q.price, 'Acquisitions', `Bought a ${bp.name} from ${c.name}`);
+  c.cash += q.price;
+  c.sites = c.sites.filter((x) => x !== site);
+  const fid = newId(s, 'dc');
+  s.facilities[fid] = {
+    id: fid, parcelId, cityId: site.cityId, name: `${bp.name} (ex-${c.name})`, blueprintId: bp.id,
+    slots: bp.slots, bays: bp.bays, basePower: bp.power, baseCooling: bp.cooling, floors: bp.floors, style: 'concrete', color: s.company.color,
+    footprint: bp.footprint, equipment: {}, condition: 90, builtAt: s.gameHours, buildCost: bp.cost, shellValue: bp.cost * 0.72,
+    equipmentSpent: 0, revenueTotal: 0, profitTotal: 0, integrateUntil: s.gameHours + INTEGRATION_HOURS / 2,
+  };
+  const ps = s.parcels[parcelId];
+  ps.owner = 'player'; ps.status = 'facility'; ps.facilityId = fid; ps.boughtFor = q.price; ps.boughtAt = s.gameHours;
+  if (!s.unlockedCities.includes(site.cityId)) s.unlockedCities.push(site.cityId);
+  autoEquip(s, fid, Infinity, { free: true, maxSlots: Math.round(bp.slots * Math.min(1, site.maxCu ? site.cu / site.maxCu : 0)) });
+  s.integrations.push({ name: `${bp.name} from ${c.name}`, until: s.gameHours + INTEGRATION_HOURS / 2, costHr: (q.price * INTEGRATION_SHARE) / (INTEGRATION_HOURS / 2) });
+  s.dealCooldown[compId] = s.gameHours + 48;
+  s.stats.sitesBought = (s.stats.sitesBought ?? 0) + 1;
+  log(s, `Bought a ${bp.name} in ${cityById(site.cityId).name} from ${c.name} for ${money(q.price)}`, 'good');
+  pushNews(s, `${c.name} sells a ${cityById(site.cityId).name} data center to ${s.company.name}`, undefined, 'info', 'Deals');
   sfx('levelup');
   emit('world');
   return { ok: true };

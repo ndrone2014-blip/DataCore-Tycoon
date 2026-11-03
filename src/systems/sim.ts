@@ -17,6 +17,12 @@ import { checkAchievements, rollDailies } from './progression';
 import { deptBonus, getEffects, eff, offlineCapHours } from './modifiers';
 import { emit, toast } from '../core/bus';
 import { tickDecisions } from './decisions';
+import { ensureExpansion } from './expansionState';
+import { tickFiber } from './fiber';
+import { tickOrders } from './suppliers';
+import { tickReputation } from './reputation';
+import { tickHeadlines } from './events';
+import { pushNews } from './ledger';
 
 export interface NewGameOptions {
   name: string;
@@ -29,7 +35,7 @@ export interface NewGameOptions {
 export function newGame(o: NewGameOptions): GameState {
   const diff = ECONOMY.difficulties[o.difficulty] ?? ECONOMY.difficulties.standard;
   const now = Date.now();
-  const s: GameState = {
+  const s: GameState = ensureExpansion({
     version: SAVE_VERSION,
     seed: Math.floor(Math.random() * 1e9),
     createdAt: now,
@@ -69,7 +75,7 @@ export function newGame(o: NewGameOptions): GameState {
     idCounter: 0,
     permanent: {},
     offline: { capHours: ECONOMY.baseOfflineCapHours },
-  };
+  } as unknown as GameState);
   if (!s.unlockedCities.includes(o.startCity)) s.unlockedCities.push(o.startCity);
 
   // Starting property: a small, cheap lot with an old building on it.
@@ -89,6 +95,7 @@ export function newGame(o: NewGameOptions): GameState {
   }
   refreshCandidates(s);
   log(s, `${s.company.name} was founded in ${cityById(o.startCity).name}. Your first property: ${start.name}.`, 'good');
+  pushNews(s, `${s.company.name} opens for business in ${cityById(o.startCity).name}`, 'A new challenger enters the AI infrastructure race.', 'info', 'Company');
   const d = deriveAll(s);
   s.finance.valuationHistory.push(Math.round(d.totals.valuation));
   rollDailies(s, d);
@@ -114,8 +121,12 @@ function rollReports(s: GameState, prevHours: number, d: Derived) {
   f.cur.hour = emptyReport(nh);
   if (d.totals.profitHr > 0) addXp(s, ECONOMY.xp.profitXpScale * Math.pow(d.totals.profitHr, ECONOMY.xp.profitXpExp) * span);
   checkAchievements(s, d);
+  const newDay = Math.floor(nh / 24) !== Math.floor(ph / 24);
+  tickReputation(s, d, span, newDay);
   // day rollover
-  if (Math.floor(nh / 24) !== Math.floor(ph / 24)) {
+  if (newDay) {
+    tickHeadlines(s, d);
+    if (s.integrations.length) s.integrations = s.integrations.filter((x) => x.until > s.gameHours);
     f.daily.push(f.cur.day);
     if (f.daily.length > 90) f.daily.splice(0, f.daily.length - 90);
     f.cur.day = emptyReport(Math.floor(nh / 24) * 24);
@@ -161,8 +172,8 @@ export function step(s: GameState, realSeconds: number): Derived {
   const d = deriveAll(s);
 
   // money flows
-  const revenue: Record<string, number> = { Contracts: 0, 'Spot Market': 0 };
-  const expenses: Record<string, number> = { Electricity: 0, Cooling: 0, Maintenance: 0, 'Building Upkeep': 0, 'Property Tax': 0, Insurance: 0, Connectivity: 0 };
+  const revenue: Record<string, number> = { Contracts: 0, 'Spot Market': 0, 'Network Transit': d.totals.transitHr * dt };
+  const expenses: Record<string, number> = { Electricity: 0, Cooling: 0, Maintenance: 0, 'Building Upkeep': 0, 'Property Tax': 0, Insurance: 0, Connectivity: 0, 'Compliance Fees': 0 };
   for (const f of Object.values(s.facilities)) {
     const st = d.fac[f.id];
     if (!st) continue;
@@ -175,6 +186,7 @@ export function step(s: GameState, realSeconds: number): Derived {
     expenses['Property Tax'] += st.expenses.tax * dt;
     expenses.Insurance += st.expenses.insurance * dt;
     expenses.Connectivity += st.expenses.connectivity * dt;
+    expenses['Compliance Fees'] += st.expenses.compliance * dt;
     f.revenueTotal += st.revenueHr * dt;
     f.profitTotal += st.profitHr * dt;
   }
@@ -182,6 +194,9 @@ export function step(s: GameState, realSeconds: number): Derived {
   expenses.Salaries = d.totals.salariesHr * dt;
   expenses.Interest = d.totals.interestHr * dt;
   expenses.Headquarters = d.totals.hqHr * dt;
+  expenses['Network Upkeep'] = d.totals.networkHr * dt;
+  expenses.Integration = d.totals.integrationHr * dt;
+  expenses['R&D Budget'] = d.totals.rndHr * dt;
   flow(s, revenue, expenses);
 
   // construction & demolition
@@ -195,6 +210,8 @@ export function step(s: GameState, realSeconds: number): Derived {
   }
 
   tickResearch(s, realSeconds);
+  tickFiber(s, prev);
+  tickOrders(s);
   tickContracts(s, dt, d);
   tickEmployees(s, dt);
   tickCompetitors(s, dt, realSeconds, d);
@@ -317,6 +334,46 @@ export function catchUp(s: GameState, nowMs = Date.now(), maxSeconds?: number): 
     contracts: (s.stats.contractsCompleted ?? 0) - before.contracts,
     levels: s.level - before.level,
     compMoves: s.log.filter((l) => l.kind === 'comp' && l.t > before.gh).length,
+  };
+}
+
+/**
+ * Same as catchUp, but gives the browser room to breathe, so coming back after hours away shows a
+ * progress bar instead of freezing the tab.
+ */
+export async function catchUpAsync(s: GameState, onProgress?: (fraction: number) => void, nowMs = Date.now()): Promise<OfflineReport | null> {
+  const elapsedAll = (nowMs - s.lastRealTime) / 1000;
+  const cap = offlineCap(s) * 3600;
+  const elapsed = Math.min(elapsedAll, cap);
+  if (!isFinite(elapsed) || elapsed < 600) return catchUp(s, nowMs);
+  // run most of the time in small slices, then let catchUp finish and write the report
+  const before = { cash: s.cash, rev: s.finance.totalRevenue, exp: s.finance.totalExpenses, builds: s.stats.buildsCompleted ?? 0, research: s.research.done.length, contracts: s.stats.contractsCompleted ?? 0, level: s.level, gh: s.gameHours };
+  s.lastRealTime = nowMs;
+  const stepSec = ECONOMY.offlineStepHours / ECONOMY.gameHoursPerSecond;
+  let left = elapsed;
+  let sliceStart = performance.now();
+  while (left > 0) {
+    const chunk = Math.min(stepSec, left);
+    if (s.paused) advanceFrozen(s, chunk);
+    else advance(s, chunk);
+    left -= chunk;
+    if (performance.now() - sliceStart > 30) {
+      onProgress?.(1 - left / elapsed);
+      await new Promise((r) => setTimeout(r));
+      sliceStart = performance.now();
+    }
+  }
+  const floor = before.cash > 0 ? before.cash * 0.75 : before.cash;
+  if (s.cash < floor) {
+    const refund = floor - s.cash;
+    s.cash = floor;
+    s.finance.ledger.unshift({ t: s.gameHours, amount: refund, cat: 'Safety Net', desc: 'Offline loss protection' });
+  }
+  return {
+    seconds: elapsed, cappedFrom: elapsedAll > cap ? elapsedAll : undefined,
+    cash: s.cash - before.cash, revenue: s.finance.totalRevenue - before.rev, expenses: s.finance.totalExpenses - before.exp,
+    builds: (s.stats.buildsCompleted ?? 0) - before.builds, research: s.research.done.length - before.research, contracts: (s.stats.contractsCompleted ?? 0) - before.contracts,
+    levels: s.level - before.level, compMoves: s.log.filter((l) => l.kind === 'comp' && l.t > before.gh).length,
   };
 }
 

@@ -47,6 +47,8 @@ export interface MapEngine {
   /** Static decorative city (ground, parks, skyline buildings) around every district. */
   setCityscape(d: { ground: FC; parks: FC; buildings: FC }): void;
   setSelectedParcel(id: string | null): void;
+  /** Fiber routes drawn on the world view. */
+  setFiber?(fc: FC): void;
   setHoverInfo?(cb: (hit: MapHit | null) => void): void;
   addMarker(el: HTMLElement, ll: LngLat): MarkerHandle;
   onClick(cb: (hit: MapHit) => void): void;

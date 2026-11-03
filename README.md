@@ -1,6 +1,6 @@
 # AI Data Center Empire
 
-A browser-based 3D business and city-building simulator. Start a tiny AI infrastructure company with one run-down property, then buy land in real cities around the world, demolish what's there, build data centers (up to gigawatt-class AI campuses), fill them with GPUs, sign customers and outgrow five AI-controlled rivals.
+A browser-based 3D business and city-building simulator. Start a tiny AI infrastructure company with one run-down property, then buy land in real cities around the world, demolish what's there, build data centers (up to gigawatt-class AI campuses), fill them with GPUs, sign customers, lay fiber across oceans and outgrow, or buy out, five AI-controlled rivals.
 
 *Developed by Drone Hive Studios | Developer @ndrone40*
 
@@ -33,7 +33,7 @@ npm install          # esbuild, typescript, tsx
 npm run build        # bundles src/ → dist/game.js
 npm run dev          # rebuild on change + local server
 npm run typecheck    # strict TypeScript check
-npm test             # headless simulation test (buy → demolish → build → servers → contracts → save → offline)
+npm test             # headless simulation tests, plus every expansion system and a real v2.0 save
 npx tsx tests/bot.test.ts 3   # a scripted player plays 3 real-time hours (balance check)
 ```
 
@@ -47,6 +47,7 @@ npx tsx tests/bot.test.ts 3   # a scripted player plays 3 real-time hours (balan
 5. **Data Centers** — install servers, GPUs, accelerators, networking, cooling, power and generators. Watch power, cooling, temperature and performance.
 6. **Customers & Contracts** — sign customers for premium rates. Idle capacity earns spot-market prices.
 7. Hire **employees**, run **research**, unlock new **regions**, buy whole **zones** and consolidate them into mega campus sites, and climb to **level 100**.
+8. As you grow: choose **suppliers**, lay **fiber** between markets, give cities a **focus**, set **company policies**, and **buy rivals** or individual data centers from them.
 
 The current story mission is always shown at the bottom of the sidebar.
 
@@ -58,7 +59,7 @@ The current story mission is always shown at the bottom of the sidebar.
 - **Contract notifications** can be set to All, Problems only or Off (Contracts page or Settings).
 - **⚡ Auto-assign staff** works out the best placement for everyone, and can keep doing it as you hire and build.
 - **Find what needs attention**: the top-bar chip jumps to the next data center needing servers, the Data Centers page filters and sorts by need, and city name tags glow amber.
-- **🤝 Buy a competitor** for its valuation from the Competitors page. You get its land, running data centers and cash.
+- **🤝 Make takeover offers** from the Competitors & Deals page: a lowball, a fair price or a premium. You get the rival's land, running data centers, fiber, cash and debts. You can also buy a single data center. Integration costs money for 10 days, and acquired sites run at 85% until it finishes.
 - **Overdraft protection** covers shortfalls with a bank loan, and being away can never cost more than a quarter of your cash.
 - **Opportunity cards** pop up now and then with choices: investors, GPU rentals, press features, bulk deals, gambles and more. Ignore them and nothing bad happens.
 
@@ -77,7 +78,7 @@ The current story mission is always shown at the bottom of the sidebar.
 
 ## Features
 
-- **Realistic street-level city** — custom WebGL2 renderer with procedural architecture: glass towers with setbacks, concrete offices, brick terraces, apartments, shops with parking, malls, warehouses with loading docks, factories, houses and parks; reflective glass, real-time sun shadows, day/night with lit windows, street lights, moving traffic, and detailed data centers with chillers, generators, construction stages and an X-ray rack view. Resolution adapts automatically on slower devices.
+- **Realistic street-level city** — custom WebGL2 renderer with procedural architecture: glass towers with setbacks, concrete offices, brick terraces, apartments, shops with parking, malls, warehouses with loading docks, factories, houses and parks; reflective glass, real-time sun shadows, day/night with lit windows, street lights, moving traffic, and detailed data centers with chillers, generators, construction stages and an X-ray rack view. Off-screen parts of the city are skipped, only lots that changed get rebuilt, and resolution adapts up and down to hold a smooth frame rate.
 - **Real interactive map** — MapLibre GL JS with OpenFreeMap / OpenStreetMap vector tiles (dark-themed at runtime), globe projection at world zoom, country boundaries from Natural Earth (world-atlas), smooth fly-to transitions, breadcrumbs, zoom/reset/back controls.
 - **Four zoom levels** — world → country → city → property, the last two in one continuous 3D scene.
 - **Living cities** — every district sits inside a procedurally generated city of ~1,500 buildings: downtown towers rise toward each real city's centre, with mid-rise offices, apartments, brick walk-ups, suburbs, parks and continuous streets. The skyline appears on the map, in the 3D property view (lit windows and aviation lights at night) and in the offline view.
@@ -90,7 +91,14 @@ The current story mission is always shown at the bottom of the sidebar.
 - **21-node research tree** across AI computing, cooling, electricity, networking and automation.
 - **5 AI competitors** with distinct personalities (aggressive, conservative, technology, budget). They buy real parcels and whole zones, demolish, build, install capacity, research, win the contracts you pass on, and depress city spot prices.
 - **Progression** — levels 1–100 with titles, unlockable buildings/equipment/regions, 32 achievements (some with permanent bonuses), 19 story missions and daily missions.
-- **World events** — heat waves, grid outages, GPU shortages, hardware sales, AI booms, tax breaks, energy spikes.
+- **World events** — heat waves, grid outages, GPU shortages, hardware sales, AI booms, tax breaks, energy spikes, recessions, trade disputes, energy crises, supply crunches, chip breakthroughs, government programs and new laws. Rivals feel them too.
+- **Corporate strategy** — four long-term policies (compute focus, pricing, growth, capital), each with a real downside and a cooldown on changing it.
+- **Reputation** — measured from service, contract record, uptime, building quality, network and compliance, with history. It affects offers, contract rates, which customers will talk to you, supplier prices and valuation.
+- **Global fiber network** — 26 regional, long-haul and undersea routes on the globe, with capacity upgrades, exchanges and internet hubs. They earn transit income and give connected cities better prices. Rivals build their own and split the income on shared links.
+- **Hardware suppliers** — 18 fictional vendors across 6 categories, differing in price, performance, upkeep and delivery time. Includes shortages, new hardware generations and long-term supply contracts.
+- **Regional focus** — make a city an AI hub, cloud region, finance center, hyperscale campus or network hub. Matching what a city is known for makes the upside stronger.
+- **Country rules** — taxes, permits, efficiency limits, privacy tiers and government demand differ by country, and events change them over time.
+- **Industry news and rankings** — a live news feed, ten global leaderboards, market share by country and city, and head-to-head comparison.
 - **Saves** — IndexedDB autosave with localStorage backup, manual save, export/import, validation and repair, offline progression with an upgradable cap, and protection against clock changes.
 - **Settings** — graphics quality, UI scale, reduced motion, camera sensitivity/invert, sound and generative music volumes, offline map mode, save management.
 
@@ -98,11 +106,12 @@ The current story mission is always shown at the bottom of the sidebar.
 
 ```
 src/
-  config/      economy.ts (all balancing numbers), world.ts, buildings.ts, research.ts, content.ts
+  config/      economy.ts (all balancing numbers), expansion.ts, world.ts, buildings.ts, research.ts, content.ts
   core/        state model, RNG, formatting, event bus
   world/       procedural parcel & development-zone generation
   systems/     property, construction, equipment, derive (facility stats), contracts,
-               employees, research, competitors, events, progression, ledger, sim (tick + offline)
+               employees, research, competitors, events, progression, ledger, sim (tick + offline),
+               fiber, suppliers, reputation, regulation, strategy, rankings
   save/        IndexedDB / localStorage persistence, validation, export/import
   map/         MapLibre engine, Canvas fallback engine, map controller (levels, layers, markers)
   city/        street-level WebGL2 city: renderer, shaders, mesh builder, building models
@@ -114,6 +123,10 @@ dist/game.js   pre-built bundle
 ```
 
 All prices, rates, timers and costs live in `src/config/economy.ts` and the other config files.
+
+## Developer tools
+
+Tap the version number under Settings → About five times, then enter the password. The dashboard covers money and prices, unlocks, construction, progression, rivals, time, events, saves and debugging. To clear a forgotten password, run `localStorage.removeItem('aidce-dev-auth')` in the browser console to go back to the default. This lock only keeps out casual access, because the game runs entirely in the browser.
 
 ## Credits
 

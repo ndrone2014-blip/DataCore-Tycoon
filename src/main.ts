@@ -1,9 +1,10 @@
 // Entry point: title screen, new-game wizard, load + offline catch-up.
 
 import { App } from './ui/app';
+import { installDevLog } from './core/devLog';
 import { installDelegation, registerActions, registerChanges } from './ui/dom';
 import { loadGame, saveGame } from './save/save';
-import { newGame, catchUp } from './systems/sim';
+import { newGame, catchUpAsync } from './systems/sim';
 import { CITIES, countryById } from './config/world';
 import { ECONOMY } from './config/economy';
 import { COMPANY_COLORS, COMPANY_LOGOS } from './config/content';
@@ -15,6 +16,7 @@ import { applyMode, deviceMode, recommendedMode, rememberedMode, type DeviceMode
 declare const __GAME_VERSION__: string;
 export const GAME_VERSION = typeof __GAME_VERSION__ !== 'undefined' ? __GAME_VERSION__ : 'dev';
 (window as any).__GAME_VERSION__ = GAME_VERSION;
+installDevLog();
 const app = new App();
 (window as any).__app = app;
 installDelegation(document);
@@ -90,6 +92,13 @@ function wizardScreen() {
   startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
 }
 
+function catchUpProgress(f: number) {
+  const box = document.querySelector('.boot-actions');
+  if (!box) return;
+  if (!box.querySelector('.catchup')) box.innerHTML = '<div class="catchup"><p class="tag-line">Catching up on what happened while you were away…</p><div class="bar"><i></i></div></div>';
+  (box.querySelector('.catchup .bar i') as HTMLElement).style.width = `${Math.round(f * 100)}%`;
+}
+
 let cachedMeta: { name: string; level: number; savedAt: number } | null = null;
 let bootRepaired: string[] = [];
 let bootError: string | undefined;
@@ -108,7 +117,7 @@ registerActions({
     playSfx('complete');
     const r = await loadGame();
     if (!r.state) return titleScreen(null, [], r.error);
-    const rep = catchUp(r.state);
+    const rep = await catchUpAsync(r.state, catchUpProgress);
     app.start(r.state, rep && rep.seconds > 30 ? rep : null);
   },
   bootNew: () => {
@@ -122,7 +131,7 @@ registerActions({
     const r = await importSaveFile();
     if (!r.state) return titleScreen(cachedMeta, [], r.error);
     await saveGame(r.state, 'auto');
-    const rep = catchUp(r.state);
+    const rep = await catchUpAsync(r.state, catchUpProgress);
     app.start(r.state, rep && rep.seconds > 30 ? rep : null);
   },
   wzLogo: (el) => { wizard.logo = el.dataset.v!; wizardScreen(); },

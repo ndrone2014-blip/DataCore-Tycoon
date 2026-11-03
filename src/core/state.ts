@@ -3,7 +3,7 @@
 import type { CapType, CustomOptions } from '../config/buildings';
 import type { CustomerType, Department } from '../config/content';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export type ParcelStatus = 'existing' | 'cleared' | 'demolishing' | 'construction' | 'facility' | 'hq';
 
@@ -42,6 +42,12 @@ export interface Facility {
   profitTotal: number;
   isHQ?: boolean;
   autoRepair?: boolean;
+  /** Hardware on its way from a supplier: takes up space but doesn't run yet. */
+  orders?: { eq: string; n: number; at: number }[];
+  /** Weighted quality of installed hardware by supplier category. */
+  vendor?: Record<string, { n: number; perf: number; rel: number }>;
+  /** Acquired sites run below par until they are integrated. */
+  integrateUntil?: number;
 }
 
 export interface Project {
@@ -140,6 +146,8 @@ export interface Competitor {
   nextThink: number;
   desc: string;
   lastAction: string;
+  /** Added to the asking price after a rejected offer. */
+  askMult?: number;
 }
 
 export interface Tx {
@@ -160,6 +168,9 @@ export interface ActiveEvent {
   id: string;
   defId: string;
   cityId?: string;
+  region?: string;
+  country?: string;
+  supplier?: string;
   endsAt: number;
   startedAt: number;
 }
@@ -267,7 +278,27 @@ export interface GameState {
   /** Pending opportunity card. */
   decision?: PendingDecision;
   nextDecisionAt?: number;
+  // ---- global expansion (always present once a save has been loaded or created) ----
+  news: NewsItem[];
+  newsState: { rank: number; sat: Record<string, number> };
+  policies: Record<string, string>;
+  policyAt: Record<string, number>;
+  citySpec: Record<string, { spec: string; since: number }>;
+  fiber: { routes: FiberRoute[]; hubs: Record<string, number> };
+  supply: { chosen: Record<string, string>; deals: Record<string, SupplyDeal>; gen: Record<string, number> };
+  rep: { history: number[]; parts: Record<string, number> };
+  integrations: Integration[];
+  dealCooldown: Record<string, number>;
+  /** Developer testing overrides. Absent in normal play. */
+  dev?: DevOverrides;
 }
+
+export interface DevOverrides { land?: number; construction?: number; equipment?: number; electricity?: number; sale?: number; unlockAll?: boolean }
+
+export interface NewsItem { t: number; title: string; body?: string; kind: 'good' | 'bad' | 'info' | 'comp'; tag: string }
+export interface FiberRoute { id: string; link: string; owner: string; tier: number; startedAt: number; doneAt: number; invested: number }
+export interface SupplyDeal { supplier: string; until: number; discount: number }
+export interface Integration { name: string; until: number; costHr: number }
 
 export interface Buff {
   key: string;

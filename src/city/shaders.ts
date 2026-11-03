@@ -107,19 +107,19 @@ vec3 envRefl(vec3 R,vec3 P){
   float b=smoothstep(.3,.0,R.y+(vnoise(R.xz*2.2+P.xz*.002)-.5)*.1);
   return mix(c,mix(uSkyGnd,vec3(.05,.06,.075),.6)+uSkyHor*.16,b*.85);
 }
+#define GRIME fbm(vP.xz*.07+vP.y*vec2(.03,.21)+seed*40.)
 void main(){
   float st=vM.x, seed=vM.y, flr=max(vM.z,.5), bay=max(vM.w,.5);
   vec3 N=normalize(vN), V=normalize(uCam-vP), alb=vC;
   float rough=.82, metal=0., ao=vAO, win=0., glassRough=.05; vec2 id=vec2(0.),f=vec2(0.); float lod=0.;
   vec3 glow=vec3(0.); vec3 tint=vec3(.09,.12,.15); float litBias=.34; vec3 winN=N;
   vec2 uv=vUV; bool vertical=abs(N.y)<.5;
-  float grime=fbm(vP.xz*.07+vP.y*vec2(.03,.21)+seed*40.);
-  if(st<.5){ rough=.78; alb*=.92+.16*grime; }
+  if(st<.5){ rough=.78; alb*=.92+.16*GRIME; }
   else if(st<1.5){ // glass curtain wall
     win=grid(uv,bay,flr,vec2(.95,.86),id,f,lod); alb=mix(vec3(.08,.09,.1),vC,.12); metal=.7; rough=.42; tint=vC*.55+vec3(.02); litBias=.42;
     float sp=step(.43,abs(f.y)); if(lod<.5) win*=1.-.5*sp;
   } else if(st<2.5){ // concrete office: ribbon windows and pilasters
-    win=grid(uv,bay,flr,vec2(.8,.56),id,f,lod); rough=.86; alb*=.88+.2*grime; tint=vec3(.075,.10,.13);
+    win=grid(uv,bay,flr,vec2(.8,.56),id,f,lod); rough=.86; alb*=.88+.2*GRIME; tint=vec3(.075,.10,.13);
     if(lod<.6) alb*=1.-.22*smoothstep(.31,.29,abs(f.y+.33))*step(abs(f.x),.42);
   } else if(st<3.5){ // brick
     win=grid(uv,bay,flr,vec2(.44,.58),id,f,lod); rough=.92; litBias=.3; tint=vec3(.06,.07,.08);
@@ -128,18 +128,18 @@ void main(){
     alb*=mix(1.,(.78+.42*hash21(floor(b)))*(1.-.42*clamp(mortar,0.,1.)),fade);
     if(lod<.6){ float lintel=step(abs(f.x),.26)*(smoothstep(.28,.3,f.y)*smoothstep(.37,.35,f.y)+smoothstep(-.3,-.28,-f.y)*smoothstep(.37,.35,-f.y)); alb=mix(alb,vec3(.5,.46,.4),lintel*(1.-lod)); }
   } else if(st<4.5){ // apartments: stucco, balconies suggested by shade below each window
-    win=grid(uv,bay,flr,vec2(.5,.56),id,f,lod); rough=.9; alb*=.86+.26*grime; litBias=.45; tint=vec3(.07,.085,.1);
+    win=grid(uv,bay,flr,vec2(.5,.56),id,f,lod); rough=.9; alb*=.86+.26*GRIME; litBias=.45; tint=vec3(.07,.085,.1);
     if(lod<.6){ alb*=1.-.3*smoothstep(.34,.32,abs(f.y+.36))*step(abs(f.x),.34); }
   } else if(st<5.5){ // corrugated metal, loading doors at grade
     rough=.58; metal=.45; float r=uv.x*5.; float w=fwidth(r); float fd=1.-smoothstep(.3,.9,w);
     alb*=1.+.12*fd*sin(r*6.283); if(vertical) N=normalize(N+vec3(.09*fd*cos(r*6.283))*vec3(1,0,1)*(1.-abs(N)));
-    alb*=.84+.28*grime;
+    alb*=.84+.28*GRIME;
     if(vertical&&bay>4.){ vec2 q=vec2(fract(uv.x/bay)-.5,uv.y); float door=smoothstep(.2,.19,abs(q.x))*step(q.y,4.2);
       alb=mix(alb,vec3(.13,.14,.15)*(.8+.2*sin(q.y*18.)),door); metal*=1.-door; }
   } else if(st<6.5){ // storefronts at grade, painted wall above
     if(uv.y<flr){ win=grid(uv+vec2(bay*.5,0.),bay,flr,vec2(.92,.72),id,f,lod); win*=step(uv.y,flr*.86); tint=vec3(.19,.17,.13); litBias=1.;
       float sign=smoothstep(flr*.84,flr*.86,uv.y); alb=mix(vec3(.25),vC*1.1,sign); glow+=vC*sign*.55*uNight; }
-    else { vec2 a,b; float l; float w2=grid(uv,bay*.6,flr,vec2(.42,.5),a,b,l); win=w2; id=a; f=b; lod=l; alb=mix(vec3(.62,.58,.52),vC,.25)*(.85+.25*grime); }
+    else { vec2 a,b; float l; float w2=grid(uv,bay*.6,flr,vec2(.42,.5),a,b,l); win=w2; id=a; f=b; lod=l; alb=mix(vec3(.62,.58,.52),vC,.25)*(.85+.25*GRIME); }
     rough=.86;
   } else if(st<7.5){ // house siding
     win=grid(uv,bay,flr,vec2(.32,.48),id,f,lod); float l=uv.y*5.; float w=fwidth(l); alb*=1.-(.12*(1.-smoothstep(.3,.8,w)))*step(.8,fract(l));
@@ -161,7 +161,7 @@ void main(){
     rough=.52; metal=.5; float l=uv.y/flr; float q=fract(l); float wv=fwidth(l); float fade=1.-smoothstep(.2,.7,wv);
     float pan=step(.965,fract(uv.x/3.)); alb*=1.-.3*pan*fade;
     float louv=step(.72,q)*step(q,.9); float lo=sin(uv.y*22.)*.5+.5; alb=mix(alb,vec3(.1,.11,.125)*(.6+.8*lo),louv*fade); alb=mix(alb,alb*.82,(1.-fade)*.18);
-    alb*=.9+.18*grime;
+    alb*=.9+.18*GRIME;
   } else if(st<13.5){ // self-lit accent
     glow=vC*(.7+uNight*2.2+.25*sin(uTime*1.6+seed*9.)); alb=vC*.45; rough=.3;
   } else if(st<14.5){ // dirt

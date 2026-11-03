@@ -7,6 +7,7 @@ import { chart } from '../charts';
 import { EQUIPMENT, equipmentById, blueprintById, CAP_LABEL, type EquipmentDef } from '../../config/buildings';
 import { cityById } from '../../config/world';
 import { getParcel } from '../../world/parcels';
+import { pendingUnits } from '../../systems/suppliers';
 import { autoEquip, install, installQuote, sellEquipment, upgradeQuote, upgradeEquipment, repair, repairQuote, renameFacility, decommission, equipmentUnlocked, unitPrice } from '../../systems/equipment';
 import { landValue } from '../../systems/derive';
 import { capBar, dcNeed } from './shared';
@@ -80,8 +81,8 @@ function renderFacility(app: App, id: string): string {
     const q5 = installQuote(s, id, e.id, 5, d);
     const uq = n ? upgradeQuote(s, id, e.id, d) : null;
     return `<tr class="${u.ok ? '' : 'locked'}"><td>${e.icon} <b>${e.name}</b><br><small class="muted">${esc(e.desc)}</small></td>
-      <td class="num">${n}</td>
-      <td>${u.ok ? money(unitPrice(s, e)) : `<small>${u.reason}${e.research ? `: ${researchById(e.research).name}` : ''}</small>`}</td>
+      <td class="num">${n}${pendingUnits(f, e.id) ? `<br><small class="muted">${pendingUnits(f, e.id)} arriving</small>` : ''}</td>
+      <td>${u.ok ? money(unitPrice(s, e, f.cityId)) : `<small>${u.reason}${e.research ? `: ${researchById(e.research).name}` : ''}</small>`}</td>
       <td class="num">${e.power ? e.power + ' kW' : '—'}</td>
       <td class="row gap">
         ${u.ok ? `<button class="btn primary sm" data-act="install" data-id="${id}" data-eq="${e.id}" data-n="1" ${q1.ok ? '' : `disabled title="${esc(q1.reason ?? '')}"`}>+1</button>

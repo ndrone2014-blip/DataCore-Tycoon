@@ -3,7 +3,7 @@ import { CITIES } from '../config/world';
 // Money movement, experience and activity log. All cash changes go through here
 // so every dollar shows up in reports and transaction history.
 
-import type { GameState, LogEntry } from '../core/state';
+import type { GameState, LogEntry, NewsItem } from '../core/state';
 import { emit, toast, sfx } from '../core/bus';
 import { xpForLevel, titleForLevel } from '../config/economy';
 
@@ -63,9 +63,18 @@ export function pushTx(s: GameState, amount: number, cat: string, desc: string) 
   if (s.finance.ledger.length > 400) s.finance.ledger.length = 400;
 }
 
+/** A headline for the industry news feed. */
+export function pushNews(s: GameState, title: string, body: string | undefined, kind: NewsItem['kind'], tag: string) {
+  if (!s.news) return;
+  s.news.unshift({ t: s.gameHours, title, body, kind, tag });
+  if (s.news.length > 80) s.news.length = 80;
+  emit('news');
+}
+
 export function log(s: GameState, msg: string, kind: LogEntry['kind'] = 'info') {
   s.log.unshift({ t: s.gameHours, msg, kind });
   if (s.log.length > 200) s.log.length = 200;
+  if (kind === 'comp') pushNews(s, msg, undefined, 'comp', 'Competitors');
   emit('log', { msg, kind });
 }
 

@@ -8,15 +8,17 @@ import { spend, receive, log, stat, canAfford } from './ledger';
 import { deriveAll } from './derive';
 import { sfx, emit, toast } from '../core/bus';
 import { money } from '../core/format';
+import { cancelOrders, categoryPriceMult, recordPurchase } from './suppliers';
 
 export function equipmentUnlocked(s: GameState, d: EquipmentDef): { ok: boolean; reason?: string } {
+  if (s.dev?.unlockAll) return { ok: true };
   if (d.level && s.level < d.level) return { ok: false, reason: `Requires level ${d.level}` };
   if (d.research && !s.research.done.includes(d.research)) return { ok: false, reason: 'Requires research' };
   return { ok: true };
 }
 
-export function unitPrice(s: GameState, d: EquipmentDef): number {
-  const m = equipPriceMult(s, getEffects(s), d.kind);
+export function unitPrice(s: GameState, d: EquipmentDef, cityId?: string): number {
+  const m = equipPriceMult(s, getEffects(s), d.kind, cityId) * categoryPriceMult(s, d.id);
   return Math.round((d.cost + d.install) * m);
 }
 
@@ -38,13 +40,13 @@ export function installQuote(s: GameState, facilityId: string, eqId: string, cou
   const der = derived ?? deriveAll(s);
   const st = der.fac[facilityId];
   if (!st) return { ok: false, reason: 'Unknown', count, cost: 0 };
-  const cost = unitPrice(s, d) * count;
+  const cost = unitPrice(s, d, f.cityId) * count;
   if (d.kind === 'server') {
     if (st.slotsUsed + d.slotsUsed * count > f.slots) return { ok: false, reason: `Not enough rack space (${f.slots - st.slotsUsed} slots free)`, count, cost };
   } else if (st.baysUsed + count > f.bays) {
     return { ok: false, reason: `Not enough infrastructure bays (${f.bays - st.baysUsed} free)`, count, cost };
   }
-  const newLoad = st.itLoad + d.power * count;
+  const newLoad = st.itLoadAll + d.power * count;
   let warn: string | undefined;
   if (d.power > 0) {
     if (newLoad > st.powerCap * 1.25) return { ok: false, reason: `Insufficient power: load would be ${Math.round(newLoad)} kW vs ${Math.round(st.powerCap)} kW capacity. Add power distribution first.`, count, cost };
@@ -64,6 +66,7 @@ export function install(s: GameState, facilityId: string, eqId: string, count = 
   spend(s, q.cost, 'Equipment', `${count}× ${d.name} → ${f.name}`);
   f.equipment[eqId] = (f.equipment[eqId] ?? 0) + count;
   f.equipmentSpent += q.cost;
+  recordPurchase(s, f, eqId, count);
   stat(s, 'equipmentInstalled', count);
   if (d.kind === 'server' && d.cap) stat(s, 'serversInstalled', count);
   log(s, `Installed ${count}× ${d.name} at ${f.name}`, 'build');
@@ -80,6 +83,7 @@ export function sellEquipment(s: GameState, facilityId: string, eqId: string, co
   const value = Math.round(d.cost * 0.4 * count);
   f.equipment[eqId] -= count;
   if (f.equipment[eqId] <= 0) delete f.equipment[eqId];
+  cancelOrders(f, eqId, count);
   receive(s, value, 'Equipment Sale', `Sold ${count}× ${d.name} from ${f.name}`);
   sfx('cash');
   emit('world');
@@ -94,12 +98,12 @@ export function upgradeQuote(s: GameState, facilityId: string, eqId: string, der
   const to = equipmentById(d.upgradeTo);
   const u = equipmentUnlocked(s, to);
   if (!u.ok) return { ok: false, reason: `${to.name}: ${u.reason}`, cost: 0, to };
-  const cost = Math.max(0, unitPrice(s, to) - Math.round(d.cost * 0.5));
+  const cost = Math.max(0, unitPrice(s, to, f.cityId) - Math.round(d.cost * 0.5));
   // power check for upgrade
   const der = derived ?? deriveAll(s);
   const st = der.fac[facilityId];
   const extra = to.power - d.power;
-  if (extra > 0 && st.itLoad + extra > st.powerCap * 1.25) return { ok: false, reason: 'Insufficient power for upgrade', cost, to };
+  if (extra > 0 && st.itLoadAll + extra > st.powerCap * 1.25) return { ok: false, reason: 'Insufficient power for upgrade', cost, to };
   if (!canAfford(s, cost)) return { ok: false, reason: `Need ${money(cost)}`, cost, to };
   return { ok: true, cost, to };
 }
@@ -272,7 +276,7 @@ export function autoEquip(s: GameState, facilityId: string, budget: number, opts
         // don't blow most of the budget on a single top-end server if cheaper ones exist
         if (k < ids.length - 1 && price > (budget - spent) * 0.5) continue;
         const n = Math.max(1, Math.min(batch, Math.floor((budget - spent) / Math.max(1, price))));
-        const load = st.itLoad + e.power * n;
+        const load = st.itLoadAll + e.power * n;
         if (load > st.powerCap * 0.98) {
           if (addInfra(powers, load - st.powerCap * 0.98, der)) placed = true;
           else blocked = 'not enough power capacity (no free infrastructure bay, or too little budget for it)';
@@ -280,7 +284,7 @@ export function autoEquip(s: GameState, facilityId: string, budget: number, opts
         }
         if (load > st.coolingCap * 0.98) {
           // cooling gear itself draws power — make room for it first
-          if (st.itLoad + 18 > st.powerCap && addInfra(powers, 18, der)) placed = true;
+          if (st.itLoadAll + 18 > st.powerCap && addInfra(powers, 18, der)) placed = true;
           else if (addInfra(cools, load - st.coolingCap * 0.98, der)) placed = true;
           else blocked = 'not enough cooling capacity (no free infrastructure bay, or too little budget for it)';
           continue;
