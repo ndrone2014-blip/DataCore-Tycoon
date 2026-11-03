@@ -53,7 +53,7 @@ export function recordPurchase(s: GameState, f: Facility, eqId: string, count: n
 export function chooseSupplier(s: GameState, cat: SupplyCat, id: string): { ok: boolean; reason?: string } {
   const sup = supplierById(id);
   if (!sup || sup.cat !== cat) return { ok: false, reason: 'Unknown supplier' };
-  if (s.level < sup.level) return { ok: false, reason: `Requires level ${sup.level}` };
+  if (s.level < sup.level && !s.dev?.unlockAll) return { ok: false, reason: `Requires level ${sup.level}` };
   const deal = s.supply.deals[cat];
   if (deal && deal.supplier !== id && deal.until > s.gameHours) return { ok: false, reason: `You're under contract with ${supplierById(deal.supplier)?.name} for ${Math.ceil((deal.until - s.gameHours) / 24)} more days` };
   s.supply.chosen[cat] = id;

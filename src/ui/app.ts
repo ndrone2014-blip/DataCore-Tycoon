@@ -678,6 +678,8 @@ export class App {
       </div>`);
   }
 
+  get tickRate() { return this.fps; }
+  get renderMs() { return this.renderCost; }
   get uptime() {
     return (Date.now() - this.bootTime) / 1000;
   }

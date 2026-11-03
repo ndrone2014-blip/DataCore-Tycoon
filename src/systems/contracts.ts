@@ -57,7 +57,7 @@ export function generateOffer(s: GameState, der: Derived): Contract {
   const marketFactor = 0.35 + 0.65 * Math.min(1.2, price);
   const capFx = eff(der.effects, cap === 'gpu' ? 'gpuRate' : cap === 'cpu' ? 'cpuRate' : 'storageRate');
   const localFx = 1 + capFx + spec.rates[cap] + spec.contractRate + (der.net.city[cityPref]?.contractBonus ?? 0);
-  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * localFx * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
+  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * localFx * (s.dev?.sale ?? 1) * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
   const lifetime = randRange(ECONOMY.offerLifetimeHours[0], ECONOMY.offerLifetimeHours[1]);
   return {
     id: newId(s, 'ct'),

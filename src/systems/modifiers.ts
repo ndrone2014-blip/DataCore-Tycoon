@@ -53,11 +53,11 @@ export function activeEvent(s: GameState, defId: string, cityId?: string): boole
 
 export function powerPrice(s: GameState, cityId: string): number {
   const c = cityById(cityId);
-  return c.powerPrice * (s.events.some((e) => e.defId === 'energy_spike' && e.cityId === cityId) ? 1.3 : 1) * cityMods(s, cityId).powerMult;
+  return c.powerPrice * (s.events.some((e) => e.defId === 'energy_spike' && e.cityId === cityId) ? 1.3 : 1) * cityMods(s, cityId).powerMult * (s.dev?.electricity ?? 1);
 }
 
 export function equipPriceMult(s: GameState, e: Effects, kind: 'server' | 'infra', cityId?: string): number {
-  let m = 1 - eff(e, 'equipCost');
+  let m = (1 - eff(e, 'equipCost')) * (s.dev?.equipment ?? 1);
   if (kind === 'server' && s.events.some((x) => x.defId === 'gpu_shortage')) m *= 1.2;
   if (kind === 'server' && s.events.some((x) => x.defId === 'chip_breakthrough')) m *= 0.9;
   if (cityId) m *= cityMods(s, cityId).equipMult;
@@ -69,7 +69,7 @@ export function equipPriceMult(s: GameState, e: Effects, kind: 'server' | 'infra
 export function constructionMult(s: GameState, cityId: string, e: Effects): number {
   let m = cityById(cityId).constructionMult * (1 - eff(e, 'buildCost'));
   if (s.events.some((x) => x.defId === 'tax_break' && x.cityId === cityId)) m *= 0.8;
-  m *= cityMods(s, cityId).permitCost;
+  m *= cityMods(s, cityId).permitCost * (s.dev?.construction ?? 1);
   return m;
 }
 

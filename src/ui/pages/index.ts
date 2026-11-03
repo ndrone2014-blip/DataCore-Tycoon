@@ -6,6 +6,7 @@ import { renderDataCenters, renderEquipment, facilityActions, facilityChanges } 
 import { renderResearch, renderEmployees, renderContracts, businessActions, businessChanges } from './business';
 import { renderFinances, renderCompetitors, renderAchievements, renderSettings, companyActions, companyChanges } from './company';
 import { mapActions, mapChanges } from './mapPanel';
+import { devActions, devChanges } from './devPanel';
 import { renderStrategy, renderNetwork, renderMarkets, renderSuppliers, renderIndustry, corporateActions, corporateChanges } from './corporate';
 import { money } from '../../core/format';
 
@@ -39,5 +40,5 @@ export const PAGES: PageDef[] = [
   { id: 'competitors', title: 'Competitors & Deals', icon: 'competitors', subtitle: () => 'Rival companies, what they are worth, and how to buy them.', render: renderCompetitors },
   { id: 'industry', title: 'Industry', icon: 'industry', subtitle: () => 'News, global rankings and market share.', render: renderIndustry },
   { id: 'achievements', title: 'Achievements', icon: 'achievements', subtitle: () => 'Missions, daily goals and milestones.', render: renderAchievements },
-  { id: 'settings', title: 'Settings', icon: 'settings', subtitle: () => 'Company customization, graphics, audio and saves.', render: renderSettings },
+  { id: 'settings', title: 'Settings', icon: 'settings', subtitle: () => 'Company customization, graphics, audio and saves.', render: renderSettings, actions: devActions, changes: devChanges },
 ];

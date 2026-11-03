@@ -124,6 +124,10 @@ dist/game.js   pre-built bundle
 
 All prices, rates, timers and costs live in `src/config/economy.ts` and the other config files.
 
+## Developer tools
+
+Tap the version number under Settings → About five times, then enter the password. The dashboard covers money and prices, unlocks, construction, progression, rivals, time, events, saves and debugging. To clear a forgotten password, run `localStorage.removeItem('aidce-dev-auth')` in the browser console to go back to the default. This lock only keeps out casual access, because the game runs entirely in the browser.
+
 ## Credits
 
 Map data © OpenStreetMap contributors, tiles by OpenFreeMap / OpenMapTiles. Country boundaries from Natural Earth via world-atlas. Charts by Chart.js. Properties, companies and customers are fictional.

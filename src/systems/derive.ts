@@ -95,7 +95,7 @@ export function landValue(s: GameState, parcelId: string): number {
   const c = cityById(p.cityId);
   const diff = ECONOMY.difficulties[s.difficulty]?.priceMult ?? 1;
   const growth = s.cityDemand[p.cityId] ?? 1;
-  return Math.round(p.basePrice * c.landMult * diff * (0.55 + 0.45 * growth));
+  return Math.round(p.basePrice * c.landMult * diff * (0.55 + 0.45 * growth) * (s.dev?.land ?? 1));
 }
 
 function rawStats(s: GameState, f: Facility, e: Effects) {
@@ -278,7 +278,7 @@ export function deriveAll(s: GameState): Derived {
       let rate = ECONOMY.revenueRates[c] * ECONOMY.spotRateFraction * cityPrice[f.cityId];
       if (boom && c === 'gpu') rate *= 1.4;
       if (cloudSurge && c !== 'gpu') rate *= 1.25;
-      rate *= 1 + capRate[c] + specOf(f.cityId).rates[c] + (net.city[f.cityId]?.spotBonus ?? 0);
+      rate *= (1 + capRate[c] + specOf(f.cityId).rates[c] + (net.city[f.cityId]?.spotBonus ?? 0)) * (s.dev?.sale ?? 1);
       spot += st.free[c] * rate;
     });
     st.revenue = { contracts: cRev, spot };

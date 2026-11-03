@@ -25,5 +25,6 @@ export function ensureExpansion(s: GameState): GameState {
   if (!isObj(x.rep.parts)) x.rep.parts = {};
   if (!Array.isArray(x.integrations)) x.integrations = [];
   if (!isObj(x.dealCooldown)) x.dealCooldown = {};
+  if (x.dev !== undefined && !isObj(x.dev)) delete x.dev;
   return s;
 }

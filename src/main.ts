@@ -1,6 +1,7 @@
 // Entry point: title screen, new-game wizard, load + offline catch-up.
 
 import { App } from './ui/app';
+import { installDevLog } from './core/devLog';
 import { installDelegation, registerActions, registerChanges } from './ui/dom';
 import { loadGame, saveGame } from './save/save';
 import { newGame, catchUpAsync } from './systems/sim';
@@ -15,6 +16,7 @@ import { applyMode, deviceMode, recommendedMode, rememberedMode, type DeviceMode
 declare const __GAME_VERSION__: string;
 export const GAME_VERSION = typeof __GAME_VERSION__ !== 'undefined' ? __GAME_VERSION__ : 'dev';
 (window as any).__GAME_VERSION__ = GAME_VERSION;
+installDevLog();
 const app = new App();
 (window as any).__app = app;
 installDelegation(document);

@@ -83,7 +83,7 @@ export interface AchievementDef {
 export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'first_fiber', title: 'Lit Fiber', desc: 'Bring your first fiber route online.', icon: '🌐', metric: 'fiberOnline', target: 1, reward: { cash: 0, xp: 500 } },
   { id: 'global_backbone', title: 'Global Backbone', desc: 'Run 10 fiber routes.', icon: '🌍', metric: 'fiberOnline', target: 10, reward: { cash: 0, xp: 4000 } },
-  { id: 'trusted', title: 'Trusted Provider', desc: 'Reach a reputation of 85.', icon: '🏅', metric: 'reputation', target: 85, reward: { cash: 0, xp: 1500 } },
+  { id: 'rep_85', title: 'Trusted Provider', desc: 'Reach a reputation of 85.', icon: '🏅', metric: 'reputation', target: 85, reward: { cash: 0, xp: 1500 } },
   { id: 'specialist', title: 'Specialist', desc: 'Give 3 cities a regional focus.', icon: '🎯', metric: 'citySpecs', target: 3, reward: { cash: 0, xp: 1000 } },
   { id: 'boardroom', title: 'Boardroom Strategist', desc: 'Set all four company policies.', icon: '🧭', metric: 'policiesSet', target: 4, reward: { cash: 0, xp: 1000 } },
   { id: 'poacher', title: 'Asset Stripper', desc: 'Buy a data center from a rival.', icon: '🏷️', metric: 'sitesBought', target: 1, reward: { cash: 0, xp: 800 } },

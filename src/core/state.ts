@@ -289,7 +289,11 @@ export interface GameState {
   rep: { history: number[]; parts: Record<string, number> };
   integrations: Integration[];
   dealCooldown: Record<string, number>;
+  /** Developer testing overrides. Absent in normal play. */
+  dev?: DevOverrides;
 }
+
+export interface DevOverrides { land?: number; construction?: number; equipment?: number; electricity?: number; sale?: number; unlockAll?: boolean }
 
 export interface NewsItem { t: number; title: string; body?: string; kind: 'good' | 'bad' | 'info' | 'comp'; tag: string }
 export interface FiberRoute { id: string; link: string; owner: string; tier: number; startedAt: number; doneAt: number; invested: number }

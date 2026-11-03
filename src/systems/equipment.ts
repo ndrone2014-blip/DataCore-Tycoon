@@ -11,6 +11,7 @@ import { money } from '../core/format';
 import { cancelOrders, categoryPriceMult, recordPurchase } from './suppliers';
 
 export function equipmentUnlocked(s: GameState, d: EquipmentDef): { ok: boolean; reason?: string } {
+  if (s.dev?.unlockAll) return { ok: true };
   if (d.level && s.level < d.level) return { ok: false, reason: `Requires level ${d.level}` };
   if (d.research && !s.research.done.includes(d.research)) return { ok: false, reason: 'Requires research' };
   return { ok: true };

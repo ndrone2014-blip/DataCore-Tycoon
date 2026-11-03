@@ -2,7 +2,7 @@
 
 import type { GameState } from '../core/state';
 import { newId } from '../core/state';
-import { EVENT_DEFS } from '../config/content';
+import { EVENT_DEFS, type EventDef } from '../config/content';
 import { ECONOMY } from '../config/economy';
 import { cityById, countryById, COUNTRIES, CITIES } from '../config/world';
 import { SUPPLIERS, supplierById } from '../config/expansion';
@@ -49,15 +49,39 @@ export function tickEvents(s: GameState) {
   const cityId = def.scope === 'city' ? (playerCities.length && rand() < 0.7 ? pick(playerCities) : pick(s.unlockedCities)) : undefined;
   const hours = randRange(def.hours[0], def.hours[1]);
   const ev: ActiveEvent = { id: newId(s, 'ev'), defId: def.id, cityId, region, country, supplier, startedAt: s.gameHours, endsAt: s.gameHours + hours };
+  announce(s, def, ev);
+}
+
+function announce(s: GameState, def: EventDef, ev: ActiveEvent) {
   s.events.push(ev);
-  const t = eventText(def.id, cityId, ev);
+  const t = eventText(def.id, ev.cityId, ev);
   log(s, `${t.title}: ${t.desc}`, def.good ? 'good' : 'bad');
   pushNews(s, t.title, t.desc, def.good ? 'good' : 'bad', def.scope === 'city' ? 'Local' : def.scope === 'global' ? 'Global' : 'Markets');
   if (def.id === 'chip_breakthrough') techRelease(s);
-  if (supplier) announceShortage(s, supplier);
+  if (ev.supplier) announceShortage(s, ev.supplier);
   toast({ title: t.title, body: t.desc, kind: def.good ? 'good' : 'warn', icon: def.good ? '📣' : '⚠️' });
   sfx(def.good ? 'event_good' : 'event_bad');
   emit('world');
+}
+
+/** Starts an event on demand. `place` is a city, region or country id, or a supplier id for supply crunches. */
+export function startEvent(s: GameState, def: EventDef, place?: string): { ok: boolean; reason?: string } {
+  const hours = randRange(def.hours[0], def.hours[1]);
+  const ev: ActiveEvent = { id: newId(s, 'ev'), defId: def.id, startedAt: s.gameHours, endsAt: s.gameHours + hours };
+  if (def.scope === 'city') {
+    if (place && !CITIES.some((c) => c.id === place)) return { ok: false, reason: 'Choose a city' };
+    ev.cityId = place ?? pick(s.unlockedCities);
+  } else if (def.scope === 'region') {
+    if (place && !CITIES.some((c) => c.region === place)) return { ok: false, reason: 'Choose a region' };
+    ev.region = place ?? pick(CITIES).region;
+  } else if (def.scope === 'country') {
+    if (place && !COUNTRIES.some((c) => c.id === place)) return { ok: false, reason: 'Choose a country' };
+    ev.country = place ?? pick(COUNTRIES).id;
+  } else if (def.id === 'supply_crunch') {
+    ev.supplier = place && supplierById(place) ? place : pick(SUPPLIERS).id;
+  }
+  announce(s, def, ev);
+  return { ok: true };
 }
 
 /** Daily headlines drawn from what's really happening in the market. */

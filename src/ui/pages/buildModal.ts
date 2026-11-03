@@ -21,7 +21,7 @@ let installed = false;
 
 export function openBuildModal(app: App, parcelId: string) {
   const p = getParcel(parcelId)!;
-  const feasible = BLUEPRINTS.filter((b) => b.level <= app.s.level && b.minLot <= p.area);
+  const feasible = BLUEPRINTS.filter((b) => (app.s.dev?.unlockAll || b.level <= app.s.level) && b.minLot <= p.area);
   const bp = feasible[feasible.length - 1] ?? BLUEPRINTS[0];
   ui = { parcelId, mode: 'premade', bp: bp.id, custom: defaultCustom(bp, p), name: '' };
   if (!installed) install(app);
@@ -38,7 +38,7 @@ function render(app: App): string {
   const left = ui.mode === 'premade'
     ? `<div class="bp-list">${BLUEPRINTS.map((b) => {
         const qq = quoteBuild(s, ui!.parcelId, b.id);
-        const locked = s.level < b.level;
+        const locked = s.level < b.level && !s.dev?.unlockAll;
         const fits = p.area >= b.minLot;
         return `<button class="bp ${ui!.bp === b.id ? 'sel' : ''} ${locked || !fits ? 'dim' : ''}" data-act="bpPick" data-id="${b.id}">
           <div class="row between"><b>${b.name}</b><span>${money(b.cost)}</span></div>

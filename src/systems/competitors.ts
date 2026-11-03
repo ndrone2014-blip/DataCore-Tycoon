@@ -221,6 +221,17 @@ function startSite(s: GameState, c: Competitor, parcelId: string, city: CityDef,
   if (rand() < 0.5 || s.unlockedCities.includes(city.id)) log(s, `${c.name} started a ${bp.name} in ${city.name}`, 'comp');
 }
 
+/** Gives a rival a running data center on a free lot in this city. */
+export function addCompetitorSite(s: GameState, c: Competitor, cityId: string): boolean {
+  const p = choosePlot(s, c, cityById(cityId), 1500, 9000);
+  if (!p) return false;
+  const bp = BLUEPRINTS[p.area > 2600 ? 2 : 1];
+  const maxCu = bp.slots * cuPerSlot(c.techLevel);
+  claim(s, c, p.id, 'facility');
+  c.sites.push({ parcelId: p.id, cityId, stage: 'operational', progress: 1, total: 1, cu: maxCu * 0.5, maxCu, blueprintId: bp.id, invested: bp.cost + landValue(s, p.id) });
+  return true;
+}
+
 export function tickCompetitors(s: GameState, dt: number, realDt: number, der: Derived) {
   const dayBefore = Math.floor((s.gameHours - dt) / 24);
   const dayNow = Math.floor(s.gameHours / 24);

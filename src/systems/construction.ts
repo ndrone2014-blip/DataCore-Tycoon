@@ -88,7 +88,7 @@ export function buildSpec(s: GameState, parcelId: string, blueprintId: string, c
   const p = getParcel(parcelId)!;
   const bp = blueprintById(blueprintId);
   const reasons: string[] = [];
-  if (s.level < bp.level) reasons.push(`Requires company level ${bp.level}`);
+  if (s.level < bp.level && !s.dev?.unlockAll) reasons.push(`Requires company level ${bp.level}`);
   if (!p.zoning.heavy && ['hyperscale', 'ai_center', 'supercomputer', 'mega'].includes(bp.id)) reasons.push(`Zoning ${p.zoning.code} does not allow hyperscale-class buildings`);
   if (!custom) {
     if (p.area < bp.minLot) reasons.push(`Lot too small: needs ${bp.minLot.toLocaleString()} m² (lot is ${p.area.toLocaleString()} m²)`);
@@ -275,5 +275,5 @@ export function finishBuild(s: GameState, projectId: string): string | undefined
 }
 
 export function unlockedBlueprints(s: GameState) {
-  return BLUEPRINTS.filter((b) => s.level >= b.level);
+  return BLUEPRINTS.filter((b) => s.dev?.unlockAll || s.level >= b.level);
 }

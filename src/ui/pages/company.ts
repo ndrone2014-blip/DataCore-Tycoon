@@ -13,6 +13,7 @@ import { COMPANY_COLORS, COMPANY_LOGOS } from '../../config/content';
 import { applyMode, deviceMode, type DeviceMode } from '../../core/device';
 import { acquisitionQuote, buySite, dealPausedFor, makeOffer, OFFER_TIERS, offerChance, siteQuote } from '../../systems/competitors';
 import { companyRows } from '../../systems/rankings';
+import { renderDevTools } from './devPanel';
 import { exportSave, importSaveFile, deleteSaves, saveGame } from '../../save/save';
 
 const START = Date.UTC(2027, 0, 1, 8);
@@ -201,9 +202,10 @@ export function renderSettings(app: App): string {
       <h3 class="mt">⌨️ Shortcuts</h3>
       <div class="kv small"><span>Pause / resume</span><b>Space</b><span>Game speed</span><b>1 · 2 · 3</b><span>World map</span><b>M</b><span>Back / close</span><b>Esc</b><span>Save</span><b>Ctrl+S</b></div>
       <h3 class="mt">ℹ️ About</h3>
-      <p class="small muted">AI Data Center Empire <b>${(window as any).__GAME_VERSION__ ?? ''}</b> · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
+      <p class="small muted">AI Data Center Empire <b data-act="devTap">${(window as any).__GAME_VERSION__ ?? ''}</b> · Map: ${esc(app.map?.attribution ?? 'not loaded yet')} · 3D: ${app.pv ? (app.pv.kind === 'three' ? 'Three.js / WebGL' : 'Canvas fallback') : 'loads on first property view'}.</p>
     </div>
-  </div>`;
+  </div>
+  ${renderDevTools(app)}`;
 }
 
 export function companyActions(app: App) {
@@ -253,9 +255,10 @@ export function companyActions(app: App) {
       const r = await importSaveFile();
       if (!r.state) return app.run(() => ({ ok: false, reason: r.error ?? 'Invalid save' }));
       await saveGame(r.state, 'auto');
+      (window as any).__skipUnloadSave = true; // otherwise leaving the page saves the old game back over the import
       location.reload();
     },
-    loadSave: () => confirmDialog('Load last save?', 'Unsaved progress since the last autosave will be lost.', 'Load', () => location.reload()),
+    loadSave: () => confirmDialog('Load last save?', 'Unsaved progress since the last autosave will be lost.', 'Load', () => { (window as any).__skipUnloadSave = true; location.reload(); }),
     newGame: () => confirmDialog('Start a new game?', 'Your current company will be replaced. Export your save first if you want to keep it.', 'New game', async () => {
       await deleteSaves();
       (window as any).__skipUnloadSave = true;
