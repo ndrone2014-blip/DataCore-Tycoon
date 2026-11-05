@@ -13,6 +13,9 @@ import { landValue } from '../../systems/derive';
 import { capBar, dcNeed } from './shared';
 import { DEPARTMENTS } from '../../config/content';
 import { researchById } from '../../config/research';
+import { hookupCard } from './progress';
+import { hasFeature } from '../../systems/career';
+import { hookupsDone } from '../../systems/careerCore';
 
 export function renderDataCenters(app: App): string {
   const s = app.s, d = app.d;
@@ -58,7 +61,8 @@ export function renderDataCenters(app: App): string {
       <div class="row between small muted"><span>Condition ${f.condition.toFixed(0)}%</span><span>${s.contracts.active.filter((c) => c.facilityId === f.id).length} contracts</span></div>
       <div class="row gap mt wrap dc-actions">
         ${need.level !== 'ok' ? `<span class="tag bad sm">⚠ ${need.label}</span>` : ''}
-        ${st.slotsUsed < f.slots ? btn('⚡ Fill racks', 'autoEquip', { id: f.id, k: 1 }, 'primary sm', s.cash < 15000 ? 'Not enough cash' : undefined) : ''}
+        ${!hookupsDone(f) ? `<span class="tag bad sm">🔌 Not connected</span>` : ''}
+        ${st.slotsUsed < f.slots && hasFeature(s, 'g_stage2') ? btn('⚡ Fill racks', 'autoEquip', { id: f.id, k: 1 }, 'primary sm', s.cash < 15000 ? 'Not enough cash' : undefined) : ''}
         <button class="btn ghost sm" data-act="openParcel" data-id="${f.parcelId}">📍 Show on map</button>
       </div>
     </div>`;
@@ -117,6 +121,7 @@ function renderFacility(app: App, id: string): string {
       <div><label>Lifetime profit</label><b class="${f.profitTotal >= 0 ? 'pos' : 'neg'}">${money(f.profitTotal)}</b></div>
     </div>
   </div>
+  ${hookupCard(app, f)}
   <div class="grid3 mt">
     <div class="card">
       <h3>Capacity</h3>
@@ -156,7 +161,8 @@ function renderFacility(app: App, id: string): string {
       <select data-change="addStaffHere" data-id="${id}"><option value="">＋ Assign someone here…</option>${s.employees.filter((e) => e.assigned !== id).map((e) => `<option value="${e.id}">${DEPARTMENTS[e.dept].icon} ${esc(e.name)} (${'★'.repeat(e.skill)})</option>`).join('')}</select></div>
     <p class="small muted">${s.employees.filter((e) => e.assigned === id).map((e) => `${DEPARTMENTS[e.dept].icon} ${esc(e.name)}`).join(' · ') || 'Nobody assigned here. Staff at HQ still help every site a little.'}</p>
   </div>
-  <div class="card mt auto-equip">
+  ${hasFeature(s, 'g_stage2') ? '' : '<div class="card mt"><p class="small muted">🔒 Auto-equip unlocks with Established Company status. Until then, every rack is your call: watch power, cooling and network as you add servers.</p></div>'}
+  <div class="card mt auto-equip ${hasFeature(s, 'g_stage2') ? '' : 'hidden'}">
     <div class="row between wrap gap"><div><h3>⚡ Auto-equip</h3><p class="small muted">Fill free rack slots with a balanced mix of the best servers you've unlocked. Networking, power and cooling are added automatically so nothing overloads.</p></div>
     <div class="row gap wrap">${[0.25, 0.5, 1].map((k) => `<button class="btn ${k === 1 ? 'primary' : 'ghost'}" data-act="autoEquip" data-id="${id}" data-k="${k}" ${st.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled' : ''}>Spend up to ${money(Math.max(0, s.cash) * k)}</button>`).join('')}</div></div>
   </div>

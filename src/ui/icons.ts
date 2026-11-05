@@ -21,6 +21,7 @@ export const ICONS: Record<string, string> = {
   markets: p('<path d="M3 21h18M4 21V10l8-6 8 6v11"/><path d="M9 21v-6h6v6M8 11h.01M16 11h.01"/>'),
   strategy: p('<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>'),
   industry: p('<path d="M4 5h13a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M19 9h2v8a2 2 0 0 1-2 2M8 9h7M8 13h7M8 17h4"/>'),
+  progress: p('<path d="M4 20V4"/><path d="M4 20h16"/><path d="m8 15 4-4 3 3 5-6"/><path d="M16 8h4v4"/>'),
   play: p('<path d="M7 4v16l13-8z" fill="currentColor"/>'),
   pause: p('<path d="M7 4h3v16H7zM14 4h3v16h-3z" fill="currentColor"/>'),
   save: p('<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/>'),

@@ -8,7 +8,9 @@ import { chart } from '../charts';
 import { loanLimit, takeLoan, repayLoan, offlineCap } from '../../systems/sim';
 import { cityById } from '../../config/world';
 import { blueprintById } from '../../config/buildings';
-import { ACHIEVEMENTS, METRICS, currentStory, missionProgress, claimMission, STORY } from '../../systems/progression';
+import { ACHIEVEMENTS, METRICS, currentStory, missionProgress, claimMission, storyOf } from '../../systems/progression';
+import { creditLimitShare, hasFeature, rewardCash } from '../../systems/careerCore';
+import { loanCards } from './progress';
 import { COMPANY_COLORS, COMPANY_LOGOS } from '../../config/content';
 import { applyMode, deviceMode, type DeviceMode } from '../../core/device';
 import { acquisitionQuote, buySite, dealPausedFor, makeOffer, OFFER_TIERS, offerChance, siteQuote } from '../../systems/competitors';
@@ -61,9 +63,10 @@ export function renderFinances(app: App): string {
         ${[0.25, 0.5, 1].map((k) => btn(`Borrow ${money(Math.round((limit * k) / 10000) * 10000)}`, 'loan', { v: Math.round((limit * k) / 10000) * 10000 }, 'ghost sm', limit < 10000 ? 'No credit available' : undefined)).join('')}
         ${btn(`Repay ${money(Math.min(s.debt, s.cash))}`, 'repay', { v: Math.min(s.debt, s.cash) }, 'primary sm', s.debt <= 0 ? 'No debt' : s.cash <= 0 ? 'No cash' : undefined)}
       </div>
-      <p class="small muted mt">Credit limit is 35% of company valuation. Leverage carefully — interest is charged every hour.</p>
+      <p class="small muted mt">Credit limit is ${Math.round(creditLimitShare(s) * 100)}% of company valuation. Leverage carefully — interest is charged every hour.</p>
     </div>
   </div>
+  ${loanCards(app)}
   <div class="card mt">
     <div class="row between wrap"><h3>Financial reports</h3><div class="tabs">${(['hourly', 'daily', 'monthly'] as const).map((t) => `<button class="${tab === t ? 'on' : ''}" data-act="finTab" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div></div>
     <div class="grid2">
@@ -118,7 +121,7 @@ function marketplace(app: App): string {
       const q = acquisitionQuote(s, r.id);
       const paused = dealPausedFor(s, r.id);
       const status = paused > 0 ? `<span class="tag">Talks paused ${Math.ceil(paused / 24)}d</span>` : c.cash < 0 || c.revenueHr < c.expenseHr ? '<span class="tag warn">Seeking a buyer</span>' : '<span class="tag ok">Open to offers</span>';
-      return `<tr><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b></td><td>${money(r.valuation)}</td><td>${money(r.revenue)}</td><td class="${r.profit >= 0 ? 'pos' : 'neg'}">${money(r.profit)}</td><td>${r.facilities}</td><td>${num(r.employees)}</td><td>${pct(r.share)}</td><td>${status}</td><td><b>${money(q.price)}</b></td><td class="row gap">${btn('Offer', 'buyComp', { id: r.id }, 'primary sm', paused > 0 ? 'Talks are paused' : undefined)}<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Sites</button></td></tr>`;
+      return `<tr><td><span class="logo-dot" style="background:${r.color}">${esc(r.logo)}</span> <b>${esc(r.name)}</b></td><td>${money(r.valuation)}</td><td>${money(r.revenue)}</td><td class="${r.profit >= 0 ? 'pos' : 'neg'}">${money(r.profit)}</td><td>${r.facilities}</td><td>${num(r.employees)}</td><td>${pct(r.share)}</td><td>${status}</td><td><b>${money(q.price)}</b></td><td class="row gap">${btn('Offer', 'buyComp', { id: r.id }, 'primary sm', !hasFeature(s, 'g_deals') ? 'Takeovers unlock with Major Business Opportunities' : paused > 0 ? 'Talks are paused' : undefined)}<button class="btn ghost sm" data-act="compSel" data-id="${r.id}">Sites</button></td></tr>`;
     }).join('')}</tbody></table></div>
     ${running.length ? `<h4 class="sect">Integrations in progress</h4>${running.map((x) => `<div class="list-row static"><span class="flag">🔧</span><span class="grow"><b>${esc(x.name)}</b><small>${money(x.costHr)}/h · ${Math.ceil((x.until - s.gameHours) / 24)} days left</small></span></div>`).join('')}` : ''}
   </div>`;
@@ -131,9 +134,9 @@ export function renderAchievements(app: App): string {
   const missions = `
     <div class="grid2">
       <div class="card">
-        <h3>📖 Story missions <small class="muted">(${s.missions.tutorial}/${STORY.length})</small></h3>
+        <h3>📖 Story missions <small class="muted">(${s.missions.tutorial}/${storyOf(s).length})</small></h3>
         ${st ? (() => { const p = missionProgress(s, d, { ...st, base: 0 }); const v = METRICS[st.metric](s, d); return `<div class="mission ${p >= 1 ? 'ready' : ''}"><b>${esc(st.title)}</b><p>${esc(st.desc)}</p>${bar(p, '', `${num(Math.min(v, st.target))} / ${num(st.target)}`)}<div class="row between mt"><small>Reward: ${st.reward.cash ? money(st.reward.cash) : ''} ${st.reward.xp ? `+${st.reward.xp} XP` : ''}</small>${btn('Claim', 'claimStory', { id: st.id }, 'primary sm', p >= 1 ? undefined : 'Not complete')}</div></div>`; })() : '<p class="pos">All story missions complete!</p>'}
-        <div class="story-list">${STORY.map((m, i) => `<span class="${i < s.missions.tutorial ? 'done' : i === s.missions.tutorial ? 'cur' : ''}">${i < s.missions.tutorial ? '✓' : i + 1}. ${esc(m.title)}</span>`).join('')}</div>
+        <div class="story-list">${storyOf(s).map((m, i) => `<span class="${i < s.missions.tutorial ? 'done' : i === s.missions.tutorial ? 'cur' : ''}">${i < s.missions.tutorial ? '✓' : i + 1}. ${esc(m.title)}</span>`).join('')}</div>
       </div>
       <div class="card">
         <h3>📅 Daily missions <small class="muted">reset at midnight</small></h3>
@@ -144,7 +147,7 @@ export function renderAchievements(app: App): string {
   const ach = `<div class="ach-grid">${ACHIEVEMENTS.map((a) => {
     const done = s.achievements[a.id] !== undefined;
     const v = METRICS[a.metric](s, d);
-    return `<div class="ach ${done ? 'done' : ''}"><div class="ach-icon">${a.icon}</div><div><b>${esc(a.title)}</b><p>${esc(a.desc)}</p>${done ? `<small class="pos">Unlocked ${gameDate(START, s.achievements[a.id], false)}</small>` : bar(Math.min(1, v / a.target), 'sm')}<small class="muted">${[a.reward.cash ? money(a.reward.cash) : '', a.reward.xp ? `+${a.reward.xp} XP` : '', a.reward.permLabel ?? ''].filter(Boolean).join(' · ')}</small></div></div>`;
+    return `<div class="ach ${done ? 'done' : ''}"><div class="ach-icon">${a.icon}</div><div><b>${esc(a.title)}</b><p>${esc(a.desc)}</p>${done ? `<small class="pos">Unlocked ${gameDate(START, s.achievements[a.id], false)}</small>` : bar(Math.min(1, v / a.target), 'sm')}<small class="muted">${[a.reward.cash ? money(rewardCash(s, a.reward.cash)) : '', a.reward.xp ? `+${a.reward.xp} XP` : '', a.reward.permLabel ?? ''].filter(Boolean).join(' · ')}</small></div></div>`;
   }).join('')}</div>`;
   return `<div class="tabs"><button class="${tab === 'missions' ? 'on' : ''}" data-act="achTab" data-v="missions">Missions</button><button class="${tab === 'achievements' ? 'on' : ''}" data-act="achTab" data-v="achievements">Achievements (${unlocked}/${ACHIEVEMENTS.length})</button></div>
     <div class="mt">${tab === 'missions' ? missions : ach}</div>`;
@@ -164,6 +167,7 @@ export function renderSettings(app: App): string {
       <h3 class="mt">🎨 Graphics & performance</h3>
       <label class="set-row"><span>Graphics quality<small>City detail updates after a reload</small></span><select data-change="setting" data-k="graphics">${['low', 'medium', 'high'].map((g) => `<option value="${g}" ${st.graphics === g ? 'selected' : ''}>${g[0].toUpperCase() + g.slice(1)}</option>`).join('')}</select></label>
       <label class="set-row"><span>Time of day<small>Lighting for the 3D view & map</small></span><select data-change="setting" data-k="timeOfDay">${[['auto', 'Cinematic cycle'], ['day', 'Day'], ['sunset', 'Golden hour'], ['night', 'Night']].map(([v, l]) => `<option value="${v}" ${st.timeOfDay === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="set-row"><span>🍂 Seasonal decorations<small>Thanksgiving trees, pumpkins and colors. Auto shows them in November.</small></span><select data-change="setting" data-k="seasonal">${[['auto', 'Auto (November)'], ['on', 'Always on'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${(st.seasonal ?? 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${check('bloom', 'Glow effects', st.bloom, 'Neon accents, light halos, pulsing markers')}
       ${check('celebrations', 'Celebrations', st.celebrations !== false, 'Confetti on level-ups & achievements, income pops')}
       ${range('uiScale', 'UI scale', 0.8, 1.3, 0.05, st.uiScale, (x) => Math.round(x * 100) + '%')}
@@ -181,8 +185,8 @@ export function renderSettings(app: App): string {
       ${range('sfxVolume', 'Sound effects', 0, 1, 0.05, st.sfxVolume, (x) => Math.round(x * 100) + '%')}
       ${range('musicVolume', 'Ambient music', 0, 1, 0.05, st.musicVolume, (x) => Math.round(x * 100) + '%')}
       <h3 class="mt">😌 Comfort</h3>
-      ${check('autoContracts', 'Auto-sign contracts', !!st.autoContracts, 'Accept every offer that fits a facility')}
-      ${check('autoAssignStaff', 'Auto-assign staff', !!st.autoAssignStaff, 'New hires and new sites get staffed automatically')}
+      ${hasFeature(s, 'g_stage2') ? `${check('autoContracts', 'Auto-sign contracts', !!st.autoContracts, 'Accept every offer that fits a facility')}
+      ${check('autoAssignStaff', 'Auto-assign staff', !!st.autoAssignStaff, 'New hires and new sites get staffed automatically')}` : '<p class="small muted">🔒 Auto-sign and auto-assign unlock with Established Company status.</p>'}
       <label class="set-row"><span>Contract notifications<small>Pop-ups, sounds and the menu badge</small></span><select data-change="setting" data-k="contractAlerts">${[['all', 'All'], ['problems', 'Problems only'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${(st.contractAlerts ?? 'all') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${check('autoLoan', 'Overdraft protection', st.autoLoan !== false, 'The bank covers shortfalls instead of letting cash go negative')}
       <p class="small muted">Tip: press <b>Space</b> or <b>⏸ Stop time</b> to freeze the economy while you plan — construction and research keep going.</p>

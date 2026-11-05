@@ -30,6 +30,10 @@ export function startTitleScene(canvas: HTMLCanvasElement) {
   }
   const packets = Array.from({ length: 70 }, () => ({ lane: Math.floor(rnd() * 10), t: rnd(), v: 0.04 + rnd() * 0.08, axis: rnd() < 0.5 ? 0 : 1, col: rnd() < 0.5 ? '#60a5fa' : rnd() < 0.5 ? '#a78bfa' : '#22d3ee' }));
 
+  // a few leaves drifting across the title screen in the fall; a handful of rectangles costs nothing
+  const leaves = document.documentElement.classList.contains('season-fall') && !document.documentElement.classList.contains('reduce-motion')
+    ? Array.from({ length: 22 }, () => ({ x: rnd(), y: rnd(), v: 0.018 + rnd() * 0.03, sway: rnd() * 6.28, s: 3 + rnd() * 4, c: ['#ea580c', '#f59e0b', '#b91c1c', '#ca8a04'][Math.floor(rnd() * 4)] }))
+    : [];
   const frame = (now: number) => {
     raf = requestAnimationFrame(frame);
     if (!canvas.isConnected) return stopTitleScene();
@@ -145,6 +149,18 @@ export function startTitleScene(canvas: HTMLCanvasElement) {
     hz.addColorStop(1, 'rgba(6,12,26,0.55)');
     ctx.fillStyle = hz;
     ctx.fillRect(0, 0, W, H);
+    for (const l of leaves) {
+      const ly = ((l.y + t * l.v) % 1) * H, lx = l.x * W + Math.sin(t * 0.8 + l.sway) * 26;
+      ctx.save();
+      ctx.translate(lx, ly);
+      ctx.rotate(t + l.sway);
+      ctx.fillStyle = l.c;
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, l.s, l.s * 0.5, 0, 0, 6.3);
+      ctx.fill();
+      ctx.restore();
+    }
   };
   raf = requestAnimationFrame(frame);
 }

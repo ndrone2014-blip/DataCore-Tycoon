@@ -9,10 +9,12 @@ import { deriveAll } from './derive';
 import { sfx, emit, toast } from '../core/bus';
 import { money } from '../core/format';
 import { cancelOrders, categoryPriceMult, recordPurchase } from './suppliers';
+import { hasFeature } from './careerCore';
 
 export function equipmentUnlocked(s: GameState, d: EquipmentDef): { ok: boolean; reason?: string } {
   if (s.dev?.unlockAll) return { ok: true };
   if (d.level && s.level < d.level) return { ok: false, reason: `Requires level ${d.level}` };
+  if (['substation', 'generator_x', 'liquid'].includes(d.id) && !hasFeature(s, 'g_adv_infra')) return { ok: false, reason: 'Unlocks with Advanced Infrastructure' };
   if (d.research && !s.research.done.includes(d.research)) return { ok: false, reason: 'Requires research' };
   return { ok: true };
 }
@@ -95,6 +97,7 @@ export function upgradeQuote(s: GameState, facilityId: string, eqId: string, der
   const d = equipmentById(eqId);
   if (!f || !d || !f.equipment[eqId]) return { ok: false, reason: 'None installed', cost: 0 };
   if (!d.upgradeTo) return { ok: false, reason: 'No upgrade available', cost: 0 };
+  if (!hasFeature(s, 'g_upgrades')) return { ok: false, reason: 'Unlocks with Building Upgrades', cost: 0 };
   const to = equipmentById(d.upgradeTo);
   const u = equipmentUnlocked(s, to);
   if (!u.ok) return { ok: false, reason: `${to.name}: ${u.reason}`, cost: 0, to };
@@ -206,6 +209,7 @@ export const INFRA_EQUIPMENT = EQUIPMENT.filter((e) => e.kind === 'infra');
 export function autoEquip(s: GameState, facilityId: string, budget: number, opts: { free?: boolean; maxSlots?: number } = {}): { ok: boolean; reason?: string; count: number; spent: number } {
   const f = s.facilities[facilityId];
   if (!f || f.isHQ) return { ok: false, reason: 'Unknown facility', count: 0, spent: 0 };
+  if (!opts.free && !hasFeature(s, 'g_stage2')) return { ok: false, reason: 'Auto-equip unlocks with Established Company status', count: 0, spent: 0 };
   const realCash = s.cash;
   if (opts.free) { s.cash = 1e15; budget = Infinity; }
   // a small percentage of a small balance must still be able to buy the first server

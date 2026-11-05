@@ -28,10 +28,14 @@ import { currentStory, missionProgress } from '../systems/progression';
 import { CITIES, countryById, cityById } from '../config/world';
 import { getParcel } from '../world/parcels';
 import { stopTitleScene } from './titleScene';
+import { hasFeature, isCareer, pageLocked, type Milestone } from '../systems/career';
+import { renderLocked } from './pages/progress';
+import { applySeasonClass, rememberSeason, seasonOn } from '../core/season';
+import { pushNews } from '../systems/ledger';
 
 export type Result = { ok: boolean; reason?: string } | void | undefined | boolean;
 
-const MOBILE_LABEL: Record<string, string> = { dashboard: 'Home', map: 'Map', datacenters: 'DCs', contracts: 'Contracts' };
+const MOBILE_LABEL: Record<string, string> = { dashboard: 'Home', map: 'Map', datacenters: 'DCs', contracts: 'Contracts', progress: 'Progress' };
 
 export class App {
   s!: GameState;
@@ -62,6 +66,7 @@ export class App {
   private bootTime = Date.now();
   private lastPop = 0;
   private popCash = 0;
+  private milestones: Milestone[] = [];
 
   start(state: GameState, offline: OfflineReport | null) {
     this.s = state;
@@ -91,6 +96,12 @@ export class App {
     on('facilityBuilt', () => { if (this.s.settings.celebrations !== false) confetti(0.7); });
     on('achievement', () => { if (this.s.settings.celebrations !== false) confetti(0.6, ['#facc15', '#fde68a', '#f59e0b', '#ffffff']); });
     on('decision', () => this.render());
+    on('researchDone', () => { if (this.s.settings.celebrations !== false) confetti(0.45, ['#a78bfa', '#60a5fa', '#22d3ee', '#ffffff']); });
+    on('milestone', (m: Milestone) => {
+      if (m.big && this.s.settings.celebrations !== false) this.milestones.push(m);
+      else if (m.big) showToast({ title: m.title, body: m.opens.length ? `Unlocked: ${m.opens.join(' · ')}` : m.body, kind: 'achievement', icon: m.icon });
+      else if (this.s.settings.celebrations !== false) confetti(0.35, this.seasonColors());
+    });
     on('maphover', (t: string) => {
       const el = document.getElementById('map-hover');
       if (el) {
@@ -112,6 +123,36 @@ export class App {
     this.loopTimer = window.setInterval(() => this.tick(), 100);
     this.render(true);
     if (offline) this.showOfflineReport(offline);
+    this.greetSeason();
+  }
+
+  private seasonColors(): string[] {
+    return seasonOn(this.s.settings.seasonal) ? ['#ea580c', '#f59e0b', '#b91c1c', '#facc15', '#fde68a'] : ['#60a5fa', '#a78bfa', '#22d3ee', '#4ade80', '#facc15'];
+  }
+
+  /** A single friendly notice the first time the game opens in the holiday season each year. */
+  private greetSeason() {
+    const s = this.s, key = `fall-${new Date().getFullYear()}`;
+    if (!seasonOn(s.settings.seasonal) || s.career.greeted === key) return;
+    s.career.greeted = key;
+    pushNews(s, 'Industry pauses for Thanksgiving week', 'Crews are decorating job sites while the servers keep humming.', 'info', 'Season');
+    window.setTimeout(() => showToast({ title: 'Happy Thanksgiving!', body: 'The world is dressed for fall. You can turn the decorations off in Settings.', kind: 'good', icon: '🦃' }), 2500);
+  }
+
+  private showMilestone() {
+    const m = this.milestones.shift();
+    if (!m) return;
+    playSfx('levelup');
+    confetti(1.2, this.seasonColors());
+    openModal(() => `<div class="milestone">
+      <div class="ms-rays"></div>
+      <div class="ms-icon">${m.icon}</div>
+      ${m.stage ? `<small class="eyebrow">New company stage</small><h2>${esc(m.stage)}</h2>` : `<small class="eyebrow">Milestone reached</small><h2>${esc(m.title)}</h2>`}
+      <p class="muted">${esc(m.body)}</p>
+      ${m.reward ? `<div class="ms-reward">${esc(m.reward)}</div>` : ''}
+      ${m.opens.length ? `<div class="ms-opens"><small>Now unlocked</small>${m.opens.map((o) => `<span>🔓 ${esc(o)}</span>`).join('')}</div>` : ''}
+      <div class="row gap center-x mt"><button class="btn primary lg" data-act="closeModal">Keep building</button></div>
+    </div>`, { cls: 'milestone-modal' });
   }
 
   // ---------- loop ----------
@@ -158,6 +199,7 @@ export class App {
       this.render();
       this.renderCost += (performance.now() - t0 - this.renderCost) * 0.3;
     }
+    if (this.milestones.length && !isModalOpen()) this.showMilestone();
     if (Date.now() - this.lastSave > this.s.settings.autosaveSeconds * 1000) void this.save(true);
   }
 
@@ -224,7 +266,8 @@ export class App {
       const p = PAGES.find((x) => x.id === this.page);
       if (p) {
         const el = document.getElementById('page')!;
-        morph(el, `<div class="page-head"><h1>${p.title}</h1>${p.subtitle ? `<p>${p.subtitle(this)}</p>` : ''}</div>${p.render(this)}`);
+        const lock = pageLocked(s, p.id);
+        morph(el, `<div class="page-head"><h1>${p.title}</h1>${p.subtitle && !lock ? `<p>${p.subtitle(this)}</p>` : ''}</div>${lock ? renderLocked(this, lock, p.title) : p.render(this)}`);
       }
     }
     morph(document.getElementById('time-banner')!, s.paused ? `<div class="tb-inner"><span class="tb-ico">⏸</span><div><b>Time is stopped</b><small>No income, expenses, rivals or events. Construction &amp; research keep going — buy, build and upgrade freely.</small></div><button class="btn primary sm" data-act="pause">▶ Resume</button></div>` : '');
@@ -275,6 +318,7 @@ export class App {
       .sort((a, b) => (this.d.fac[a.id]?.slotsUsed ?? 0) / a.slots - (this.d.fac[b.id]?.slotsUsed ?? 0) / b.slots);
   }
   unlockableMarkets() {
+    if (!hasFeature(this.s, 'g_stage2')) return [];
     return CITIES.filter((c) => !this.s.unlockedCities.includes(c.id) && this.s.level >= c.unlockLevel && this.s.cash >= licenseFee(this.s, c.id));
   }
   private alertsHtml(): string {
@@ -296,10 +340,14 @@ export class App {
       achievements: this.claimableMissions(),
       research: s.research.active ? 0 : 0,
     };
-    const item = (p: PageDef) => `<button class="nav-item ${this.page === p.id ? 'active' : ''}" data-act="nav" data-page="${p.id}" title="${p.title}">
-      <span class="nav-ic">${icon(p.icon)}</span><span class="nav-label">${MOBILE_LABEL[p.id] && isMobile() ? MOBILE_LABEL[p.id] : p.title}</span>${badges[p.id] ? `<span class="badge">${badges[p.id]}</span>` : ''}</button>`;
+    const item = (p: PageDef) => {
+      const locked = !!pageLocked(s, p.id);
+      return `<button class="nav-item ${this.page === p.id ? 'active' : ''} ${locked ? 'locked' : ''}" data-act="nav" data-page="${p.id}" title="${p.title}${locked ? ' (locked)' : ''}">
+      <span class="nav-ic">${locked ? '🔒' : icon(p.icon)}</span><span class="nav-label">${MOBILE_LABEL[p.id] && isMobile() ? MOBILE_LABEL[p.id] : p.title}</span>${badges[p.id] && !locked ? `<span class="badge">${badges[p.id]}</span>` : ''}</button>`;
+    };
     if (!isMobile()) return PAGES.map(item).join('');
-    const main = ['dashboard', 'map', 'datacenters', 'contracts'];
+    // the bottom bar always shows useful pages: Progress stands in until Contracts opens up
+    const main = ['dashboard', 'map', 'datacenters', pageLocked(s, 'contracts') ? 'progress' : 'contracts'];
     const moreBadge = PAGES.filter((p) => !main.includes(p.id)).reduce((n, p) => n + (badges[p.id] ?? 0), 0);
     return `${main.map((id) => item(PAGES.find((p) => p.id === id)!)).join('')}
       <button class="nav-item ${main.includes(this.page) ? '' : 'active'}" data-act="moreMenu"><span class="nav-ic">☰</span><span class="nav-label">More</span>${moreBadge ? `<span class="badge">${moreBadge}</span>` : ''}</button>`;
@@ -413,6 +461,9 @@ export class App {
     const m = this.map, s = this.s;
     if (!m?.cityId) return [];
     const out: CityPin[] = [];
+    // while a new company saves up, keep its one available property easy to find
+    const sp = s.company.startParcel ? getParcel(s.company.startParcel) : undefined;
+    if (isCareer(s) && sp && sp.cityId === m.cityId && !parcelState(s, sp.id).owner) out.push({ id: sp.id, x: (sp.rect.x0 + sp.rect.x1) / 2, y: Math.max(8, sp.buildingHeight + 4), z: (sp.rect.y0 + sp.rect.y1) / 2, title: sp.name, sub: `For sale · ${money(landValue(s, sp.id))}`, cls: 'alert' });
     for (const [pid, ps] of Object.entries(s.parcels)) {
       if (ps.owner !== 'player' || ps.mergedInto) continue;
       const p = getParcel(pid);
@@ -623,6 +674,8 @@ export class App {
 
   applySettings() {
     const st = this.s.settings;
+    rememberSeason(st.seasonal);
+    applySeasonClass(st.seasonal);
     document.documentElement.style.setProperty('--ui-scale', String(st.uiScale));
     document.documentElement.style.fontSize = `${14 * st.uiScale}px`;
     document.documentElement.classList.toggle('reduce-motion', st.reduceMotion);

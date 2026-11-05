@@ -23,6 +23,8 @@ import { tickOrders } from './suppliers';
 import { tickReputation } from './reputation';
 import { tickHeadlines } from './events';
 import { pushNews } from './ledger';
+import { checkCareer, newCareerState, setFounderAway, starterParcel, tickCareer, tickCareerFrozen } from './career';
+import { creditLimitShare } from './careerCore';
 
 export interface NewGameOptions {
   name: string;
@@ -30,11 +32,14 @@ export interface NewGameOptions {
   color: string;
   startCity: string;
   difficulty: string;
+  /** 'legacy' reproduces the pre-v2.3 start. New companies are always career companies. */
+  mode?: 'career' | 'legacy';
 }
 
 export function newGame(o: NewGameOptions): GameState {
   const diff = ECONOMY.difficulties[o.difficulty] ?? ECONOMY.difficulties.standard;
   const now = Date.now();
+  const career = (o.mode ?? 'career') === 'career';
   const s: GameState = ensureExpansion({
     version: SAVE_VERSION,
     seed: Math.floor(Math.random() * 1e9),
@@ -45,11 +50,13 @@ export function newGame(o: NewGameOptions): GameState {
     paused: false,
     difficulty: o.difficulty,
     company: { name: o.name || 'NewCo', logo: o.logo, color: o.color, startCity: o.startCity, hqTier: 0, reputation: 50, founded: now },
-    cash: diff.cash,
+    cash: career ? diff.careerCash : diff.cash,
     debt: 0,
+    career: newCareerState(career),
     xp: 0,
     level: 1,
-    unlockedCities: CITIES.filter((c) => c.unlockLevel <= 1 && c.license === 0).map((c) => c.id),
+    // a career company starts with its home town and has to earn every other market
+    unlockedCities: career ? [o.startCity] : CITIES.filter((c) => c.unlockLevel <= 1 && c.license === 0).map((c) => c.id),
     parcels: {},
     facilities: {},
     projects: {},
@@ -74,17 +81,14 @@ export function newGame(o: NewGameOptions): GameState {
     cityDemand: Object.fromEntries(CITIES.map((c) => [c.id, 1])),
     idCounter: 0,
     permanent: {},
-    offline: { capHours: ECONOMY.baseOfflineCapHours },
+    offline: { capHours: career ? ECONOMY.career.offlineCapHours : ECONOMY.baseOfflineCapHours },
   } as unknown as GameState);
   if (!s.unlockedCities.includes(o.startCity)) s.unlockedCities.push(o.startCity);
 
-  // Starting property: a small, cheap lot with an old building on it.
-  const lay = getCityLayout(o.startCity);
-  const candidates = lay.parcels
-    .filter((p) => !p.zoneId && p.buildingFloors > 0 && p.area >= 450 && p.area <= 2400 && ['retail', 'restaurant', 'warehouse'].includes(p.type))
-    .sort((a, b) => a.basePrice - b.basePrice);
-  const start = candidates[0] ?? lay.parcels.find((p) => p.area >= 400)!;
-  s.parcels[start.id] = { owner: 'player', status: start.buildingFloors > 0 ? 'existing' : 'cleared', boughtFor: 0, boughtAt: 0 };
+  // Starting property: a small, cheap lot with an old building on it. Older-style companies are
+  // handed the deed; a career company has to earn the money to buy it.
+  const start = starterParcel(o.startCity);
+  if (!career) s.parcels[start.id] = { owner: 'player', status: start.buildingFloors > 0 ? 'existing' : 'cleared', boughtFor: 0, boughtAt: 0 };
   s.company.startParcel = start.id;
 
   s.competitors = createCompetitors(s);
@@ -94,7 +98,7 @@ export function newGame(o: NewGameOptions): GameState {
     c.history.push(Math.round(c.valuation));
   }
   refreshCandidates(s);
-  log(s, `${s.company.name} was founded in ${cityById(o.startCity).name}. Your first property: ${start.name}.`, 'good');
+  log(s, career ? `${s.company.name} was founded in a rented garage in ${cityById(o.startCity).name}. The goal: buy ${start.name}.` : `${s.company.name} was founded in ${cityById(o.startCity).name}. Your first property: ${start.name}.`, 'good');
   pushNews(s, `${s.company.name} opens for business in ${cityById(o.startCity).name}`, 'A new challenger enters the AI infrastructure race.', 'info', 'Company');
   const d = deriveAll(s);
   s.finance.valuationHistory.push(Math.round(d.totals.valuation));
@@ -121,6 +125,7 @@ function rollReports(s: GameState, prevHours: number, d: Derived) {
   f.cur.hour = emptyReport(nh);
   if (d.totals.profitHr > 0) addXp(s, ECONOMY.xp.profitXpScale * Math.pow(d.totals.profitHr, ECONOMY.xp.profitXpExp) * span);
   checkAchievements(s, d);
+  checkCareer(s, d, span);
   const newDay = Math.floor(nh / 24) !== Math.floor(ph / 24);
   tickReputation(s, d, span, newDay);
   // day rollover
@@ -197,6 +202,11 @@ export function step(s: GameState, realSeconds: number): Derived {
   expenses['Network Upkeep'] = d.totals.networkHr * dt;
   expenses.Integration = d.totals.integrationHr * dt;
   expenses['R&D Budget'] = d.totals.rndHr * dt;
+  if (d.totals.garageRevenueHr) { revenue['Garage Hosting'] = d.totals.garageRevenueHr * dt; expenses.Garage = d.totals.garageCostHr * dt; }
+  for (const f of Object.values(s.facilities)) {
+    const st = d.fac[f.id];
+    if (st?.expenses.staffing) expenses['Site Staffing'] = (expenses['Site Staffing'] ?? 0) + st.expenses.staffing * dt;
+  }
   flow(s, revenue, expenses);
 
   // construction & demolition
@@ -210,6 +220,7 @@ export function step(s: GameState, realSeconds: number): Derived {
   }
 
   tickResearch(s, realSeconds);
+  tickCareer(s, realSeconds);
   tickFiber(s, prev);
   tickOrders(s);
   tickContracts(s, dt, d);
@@ -258,7 +269,11 @@ export function advanceFrozen(s: GameState, realSeconds: number): Derived {
     }
   }
   tickResearch(s, realSeconds);
-  return deriveAll(s);
+  tickCareerFrozen(s, realSeconds);
+  const d = deriveAll(s);
+  // land bought or a site finished while time is stopped should still open what it unlocks
+  checkCareer(s, d, 0);
+  return d;
 }
 
 /** Advance in sub-steps that never straddle an hour boundary, so hourly reports are exact. */
@@ -311,12 +326,14 @@ export function catchUp(s: GameState, nowMs = Date.now(), maxSeconds?: number): 
   };
   const stepSec = ECONOMY.offlineStepHours / ECONOMY.gameHoursPerSecond;
   let left = elapsed;
+  setFounderAway(true);
   while (left > 0) {
     const chunk = Math.min(stepSec, left);
     if (s.paused) advanceFrozen(s, chunk);
     else advance(s, chunk);
     left -= chunk;
   }
+  setFounderAway(false);
   // offline safety net: being away can never cost more than a quarter of your cash
   const floor = before.cash > 0 ? before.cash * 0.75 : before.cash;
   if (s.cash < floor) {
@@ -352,6 +369,7 @@ export async function catchUpAsync(s: GameState, onProgress?: (fraction: number)
   const stepSec = ECONOMY.offlineStepHours / ECONOMY.gameHoursPerSecond;
   let left = elapsed;
   let sliceStart = performance.now();
+  setFounderAway(true);
   while (left > 0) {
     const chunk = Math.min(stepSec, left);
     if (s.paused) advanceFrozen(s, chunk);
@@ -363,6 +381,7 @@ export async function catchUpAsync(s: GameState, onProgress?: (fraction: number)
       sliceStart = performance.now();
     }
   }
+  setFounderAway(false);
   const floor = before.cash > 0 ? before.cash * 0.75 : before.cash;
   if (s.cash < floor) {
     const refund = floor - s.cash;
@@ -378,7 +397,7 @@ export async function catchUpAsync(s: GameState, onProgress?: (fraction: number)
 }
 
 export function loanLimit(s: GameState, d: Derived): number {
-  return Math.max(0, Math.round((d.totals.valuation * ECONOMY.loanLimitOfValuation - s.debt) / 10_000) * 10_000);
+  return Math.max(0, Math.round((d.totals.valuation * creditLimitShare(s) - s.debt) / 10_000) * 10_000);
 }
 
 export function takeLoan(s: GameState, d: Derived, amount: number): { ok: boolean; reason?: string } {

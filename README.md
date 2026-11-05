@@ -1,6 +1,6 @@
 # AI Data Center Empire
 
-A browser-based 3D business and city-building simulator. Start a tiny AI infrastructure company with one run-down property, then buy land in real cities around the world, demolish what's there, build data centers (up to gigawatt-class AI campuses), fill them with GPUs, sign customers, lay fiber across oceans and outgrow, or buy out, five AI-controlled rivals.
+A browser-based 3D business and city-building simulator. Start in a rented garage with almost no money, earn your first property, then buy land in real cities around the world, demolish what's there, build data centers (up to gigawatt-class AI campuses), fill them with GPUs, sign customers, lay fiber across oceans and outgrow, or buy out, five AI-controlled rivals.
 
 *Developed by Drone Hive Studios | Developer @ndrone40*
 
@@ -33,9 +33,29 @@ npm install          # esbuild, typescript, tsx
 npm run build        # bundles src/ → dist/game.js
 npm run dev          # rebuild on change + local server
 npm run typecheck    # strict TypeScript check
-npm test             # headless simulation tests, plus every expansion system and a real v2.0 save
+npm test             # headless simulation tests, every expansion system, company progression and a real v2.0 save
 npx tsx tests/bot.test.ts 3   # a scripted player plays 3 real-time hours (balance check)
 ```
+
+## How a company grows
+
+New companies climb through five stages: **Garage Startup**, **Growing Business**, **Established Company**, **Major Corporation** and **Global Empire**. The **Company Progress** page shows what you have unlocked, what to do next and what is still ahead.
+
+1. You start with one home town, about $6,000 and one property on the market. Take freelance jobs from the **Founder's Desk** and consider used servers for the garage rack.
+2. Owning land earns a **construction loan**. A finished building earns **equipment financing**, but needs **power and internet hookups** before it can earn anything.
+3. Staying profitable for four game days makes you a Growing Business and opens employees, headquarters and the property market. Research, suppliers, networks, new cities, zones, campuses and takeovers follow as you hit goals.
+
+Expansion gets easier through what you build up, not through cheaper hardware: better market rates and leaner staffing at each stage, crews that get faster with every site, cheaper utility work in towns you already serve, and research and staff bonuses. Saves from before v2.3 load as they were: everything stays unlocked and their economy is unchanged.
+
+A scripted player reports the pacing with `npx tsx tests/careerbot.test.ts [hours] [city] [difficulty]`.
+
+### Carmi, Illinois
+
+The developer's home town is a full market with its own street plan. The named streets and their directions come from local addresses, and the Little Wabash runs along the east side, but it is a game-scale plan rather than a survey, and every business is fictional. Land and power are cheap, the local market is tiny, and two farmland tracts at the edge of town can eventually hold a full campus.
+
+### Thanksgiving
+
+Fall trees, leaf drifts, pumpkins, hay bales and warmer colors appear in November. Settings → Graphics → **Seasonal decorations** switches them on or off at any time.
 
 ## How to play
 
@@ -82,7 +102,7 @@ The current story mission is always shown at the bottom of the sidebar.
 - **Real interactive map** — MapLibre GL JS with OpenFreeMap / OpenStreetMap vector tiles (dark-themed at runtime), globe projection at world zoom, country boundaries from Natural Earth (world-atlas), smooth fly-to transitions, breadcrumbs, zoom/reset/back controls.
 - **Four zoom levels** — world → country → city → property, the last two in one continuous 3D scene.
 - **Living cities** — every district sits inside a procedurally generated city of ~1,500 buildings: downtown towers rise toward each real city's centre, with mid-rise offices, apartments, brick walk-ups, suburbs, parks and continuous streets. The skyline appears on the map, in the 3D property view (lit windows and aviation lights at night) and in the offline view.
-- **Property system** — ~6,900 procedurally generated parcels across 16 real cities, 10 property types, zoning codes, restrictions, development potential, demolition costs and location-driven prices. Buy individual lots or entire development zones (15% bundle discount), then consolidate zones into single campus sites.
+- **Property system** — ~7,000 parcels across 17 real cities, including the small town of Carmi, Illinois, 10 property types, zoning codes, restrictions, development potential, demolition costs and location-driven prices. Buy individual lots or entire development zones (15% bundle discount), then consolidate zones into single campus sites.
 - **8 data center classes** from $250K modular units to the $500M Mega AI Campus, plus a full custom-building designer.
 - **18 equipment types** with purchase/installation cost, power draw, capacity, maintenance, ratings and upgrade paths; rack-slot, bay, power and cooling limits.
 - **Financial simulation** — contracts and spot market revenue; electricity, cooling, salaries, maintenance, building upkeep, property tax, insurance, connectivity and interest expenses; hourly/daily/monthly reports, charts, transaction history, valuation and bank loans. Every number on screen is driven by the simulation.

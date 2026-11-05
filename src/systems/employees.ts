@@ -8,6 +8,7 @@ import { rand, randRange, pick } from '../core/rng';
 import { spend, log, canAfford } from './ledger';
 import { sfx, emit } from '../core/bus';
 import { money } from '../core/format';
+import { hasFeature, isCareer } from './careerCore';
 
 export function staffCap(s: GameState): number {
   return HQ_TIERS[s.company.hqTier]?.staff ?? 4;
@@ -18,7 +19,7 @@ function makeCandidate(s: GameState, dept?: Department): Employee {
   const d = dept ?? pick(depts);
   const levelBias = Math.min(2, s.level / 15);
   const skill = Math.max(1, Math.min(5, Math.round(randRange(0.6, 2.6) + levelBias * rand())));
-  const salary = Math.round(DEPARTMENTS[d].salary * (0.75 + skill * 0.3) * randRange(0.9, 1.15));
+  const salary = Math.round(DEPARTMENTS[d].salary * (0.75 + skill * 0.3) * randRange(0.9, 1.15) * (isCareer(s) ? ECONOMY.career.salaryMult : 1));
   return { id: newId(s, 'em'), name: personName(rand), dept: d, skill, exp: Math.round(randRange(0, 200) * skill), perf: Math.round(randRange(55, 95)), salary, assigned: 'hq', hiredAt: 0 };
 }
 
@@ -34,6 +35,7 @@ export function hireCost(e: Employee): number {
 export function hire(s: GameState, candId: string): { ok: boolean; reason?: string } {
   const i = s.candidates.findIndex((c) => c.id === candId);
   if (i < 0) return { ok: false, reason: 'Candidate no longer available' };
+  if (!hasFeature(s, 'g_profit')) return { ok: false, reason: 'You can hire once your first data center is profitable' };
   if (s.employees.length >= staffCap(s)) return { ok: false, reason: `HQ is full (${staffCap(s)} staff). Upgrade your headquarters.` };
   const c = s.candidates[i];
   const cost = hireCost(c);
@@ -69,6 +71,7 @@ export function promoteCost(e: Employee): number {
 export function promote(s: GameState, empId: string): { ok: boolean; reason?: string } {
   const e = s.employees.find((x) => x.id === empId);
   if (!e) return { ok: false, reason: 'Unknown employee' };
+  if (!hasFeature(s, 'g_staff')) return { ok: false, reason: 'Promotions unlock with Talent Management' };
   if (e.skill >= 5) return { ok: false, reason: 'Already at maximum level' };
   if (e.exp < e.skill * 120) return { ok: false, reason: `Needs ${e.skill * 120}h experience (has ${Math.round(e.exp)}h)` };
   const cost = promoteCost(e);
@@ -101,6 +104,7 @@ const staffPower = (e: Employee) => e.skill * (0.6 + 0.4 * (e.perf / 100)) * (1 
  * sites people go on site and with many sites they stay at HQ, except that busy sites still get cover.
  */
 export function autoAssignStaff(s: GameState): number {
+  if (!hasFeature(s, 'g_stage2')) return 0;
   const facs = Object.values(s.facilities).filter((f) => !f.isHQ);
   const weight = (f: typeof facs[number]) => 1 + f.slots + Object.values(f.equipment).reduce((a, b) => a + b, 0) * 4;
   const sites = facs.sort((a, b) => weight(b) - weight(a)).slice(0, 30);

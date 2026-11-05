@@ -12,6 +12,7 @@ import { spend, log, addXp, stat, canAfford } from './ledger';
 import { parcelState, constructionSpeed } from './property';
 import { toast, sfx, emit } from '../core/bus';
 import { money } from '../core/format';
+import { builderExperience, hasFeature, isCareer } from './careerCore';
 
 export const BUILD_STAGES = [
   { name: 'Site preparation', w: 0.08 },
@@ -90,6 +91,8 @@ export function buildSpec(s: GameState, parcelId: string, blueprintId: string, c
   const reasons: string[] = [];
   if (s.level < bp.level && !s.dev?.unlockAll) reasons.push(`Requires company level ${bp.level}`);
   if (!p.zoning.heavy && ['hyperscale', 'ai_center', 'supercomputer', 'mega'].includes(bp.id)) reasons.push(`Zoning ${p.zoning.code} does not allow hyperscale-class buildings`);
+  if (['hyperscale', 'ai_center', 'supercomputer', 'mega'].includes(bp.id) && !hasFeature(s, 'g_stage3')) reasons.push('Hyperscale-class buildings unlock with Major Corporation status');
+  if (custom && !hasFeature(s, 'g_upgrades')) reasons.push('The custom designer unlocks with Building Upgrades');
   if (!custom) {
     if (p.area < bp.minLot) reasons.push(`Lot too small: needs ${bp.minLot.toLocaleString()} m² (lot is ${p.area.toLocaleString()} m²)`);
     if (bp.floors > p.zoning.maxFloors) reasons.push(`Zoning allows max ${p.zoning.maxFloors} floors (blueprint has ${bp.floors})`);
@@ -126,7 +129,8 @@ export function buildSpec(s: GameState, parcelId: string, blueprintId: string, c
 export function quoteBuild(s: GameState, parcelId: string, blueprintId: string, custom?: CustomOptions): BuildQuote {
   const p = getParcel(parcelId)!;
   const { spec, reasons } = buildSpec(s, parcelId, blueprintId, custom);
-  spec.seconds = Math.round(spec.seconds * cityMods(s, p.cityId).permitTime);
+  const learned = builderExperience(s);
+  spec.seconds = Math.round(spec.seconds * cityMods(s, p.cityId).permitTime * (1 - learned));
   const st = parcelState(s, parcelId);
   if (st.owner !== 'player') reasons.push('You must own this property');
   else if (st.status === 'existing') reasons.push('Demolish the existing building first');
@@ -147,6 +151,8 @@ export function quoteBuild(s: GameState, parcelId: string, blueprintId: string, 
   };
   const sub = Object.values(breakdown).reduce((a, b) => a + b, 0);
   breakdown['Permits & fees'] = sub * ECONOMY.permitRate;
+  // experience doesn't make steel cheaper, but it does make crews and paperwork leaner
+  if (learned > 0) for (const k of ['Labor', 'Site preparation', 'Permits & fees']) breakdown[k] *= 1 - learned;
   for (const k of Object.keys(breakdown)) breakdown[k] = Math.round(breakdown[k] / 100) * 100;
   const total = Object.values(breakdown).reduce((a, b) => a + b, 0);
   if (reasons.length === 0 && !canAfford(s, total)) reasons.push(`Need ${money(total)}`);
@@ -180,6 +186,7 @@ export function hqQuote(s: GameState, parcelId: string): { ok: boolean; reasons:
   const p = getParcel(parcelId)!;
   const reasons: string[] = [];
   const st = parcelState(s, parcelId);
+  if (!hasFeature(s, 'g_profit')) reasons.push('Headquarters unlock once your first data center is profitable');
   if (s.company.hqFacility) reasons.push('You already have a headquarters building');
   if (st.owner !== 'player') reasons.push('You must own this property');
   else if (st.status === 'existing') reasons.push('Demolish the existing building first');
@@ -249,6 +256,7 @@ export function finishBuild(s: GameState, projectId: string): string | undefined
     footprint: d.footprint, equipment: {}, condition: 100, builtAt: s.gameHours, buildCost: pr.cost + pr.speedSpent,
     shellValue: pr.cost, equipmentSpent: 0, revenueTotal: 0, profitTotal: 0, isHQ: d.isHQ,
   };
+  if (isCareer(s) && !d.isHQ) s.facilities[fid].hookups = { power: -1, net: -1 };
   // Custom builds include backup generators and security as built-in systems.
   if (d.custom?.generators) s.facilities[fid].equipment['generator'] = d.custom.generators;
   const st = s.parcels[pr.parcelId];
@@ -266,7 +274,7 @@ export function finishBuild(s: GameState, projectId: string): string | undefined
     stat(s, `built_${d.blueprintId}`);
     addXp(s, ECONOMY.xp.buildComplete + pr.cost / ECONOMY.xp.buildPer, 'Construction');
     log(s, `${d.name} is complete and ready for servers`, 'good');
-    toast({ title: 'Construction complete!', body: `${d.name} is operational. Tap here to install servers and start earning.`, kind: 'good', icon: '🏁', dcId: fid });
+    toast({ title: 'Construction complete!', body: isCareer(s) ? `${d.name} is finished. Tap here to connect power and internet.` : `${d.name} is operational. Tap here to install servers and start earning.`, kind: 'good', icon: '🏁', dcId: fid });
   }
   sfx('complete');
   emit('world');

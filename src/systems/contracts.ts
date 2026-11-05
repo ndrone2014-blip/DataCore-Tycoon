@@ -14,6 +14,7 @@ import { money, num } from '../core/format';
 import { cityById } from '../config/world';
 import { cityMods, specMods } from './regulation';
 import { REP_REQ, repOfferMult } from './reputation';
+import { hasFeature, revenueMult } from './careerCore';
 
 const MIN_SIZE: Record<CapType, number> = { cpu: 128, gpu: 8, storage: 480 };
 const STEP: Record<CapType, number> = { cpu: 64, gpu: 8, storage: 480 };
@@ -57,11 +58,11 @@ export function generateOffer(s: GameState, der: Derived): Contract {
   const marketFactor = 0.35 + 0.65 * Math.min(1.2, price);
   const capFx = eff(der.effects, cap === 'gpu' ? 'gpuRate' : cap === 'cpu' ? 'cpuRate' : 'storageRate');
   const localFx = 1 + capFx + spec.rates[cap] + spec.contractRate + (der.net.city[cityPref]?.contractBonus ?? 0);
-  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * localFx * (s.dev?.sale ?? 1) * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1);
+  const rate = amount * ECONOMY.revenueRates[cap] * def.rate * contractRateMult(s, der) * localFx * (s.dev?.sale ?? 1) * marketFactor * randRange(0.92, 1.12) * (longTerm ? 0.95 : 1) * revenueMult(s);
   const lifetime = randRange(ECONOMY.offerLifetimeHours[0], ECONOMY.offerLifetimeHours[1]);
   return {
     id: newId(s, 'ct'),
-    customer: customerName(ctype, rand),
+    customer: customerName(ctype, rand, cityById(cityPref).town),
     ctype, label, cap, amount,
     ratePerHour: Math.round(rate * 100) / 100,
     hours: days * 24, hoursLeft: days * 24,
@@ -148,7 +149,7 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
   c.nextOfferAt ??= s.gameHours + 4;
   const facilities = Object.values(s.facilities).filter((f) => !f.isHQ).length;
   if (s.gameHours >= c.nextOfferAt) {
-    if (c.offers.length < ECONOMY.maxOpenOffers && (facilities > 0 || s.stats.buildsCompleted || s.gameHours > 24)) {
+    if (c.offers.length < ECONOMY.maxOpenOffers && (facilities > 0 || s.stats.buildsCompleted || s.gameHours > 24) && hasFeature(s, 'g_operational')) {
       c.offers.push(generateOffer(s, der));
       emit('offer');
     }
@@ -156,7 +157,7 @@ export function tickContracts(s: GameState, dt: number, der: Derived) {
     c.nextOfferAt = s.gameHours + randRange(ECONOMY.offerIntervalHours[0], ECONOMY.offerIntervalHours[1]) / speed;
   }
   // auto-sign: hand offers straight to the facility with the most room
-  if (s.settings.autoContracts && c.offers.length) {
+  if (s.settings.autoContracts && c.offers.length && hasFeature(s, 'g_stage2')) {
     for (const o of [...c.offers]) {
       const best = eligibleFacilities(s, o, der).filter((x) => x.ok).sort((a, b) => b.st.free[o.cap] - a.st.free[o.cap])[0];
       if (best) acceptOffer(s, o.id, best.f.id);

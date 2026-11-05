@@ -4,7 +4,7 @@
 
 import type { GameState } from '../core/state';
 import type { Derived } from '../systems/derive';
-import { getCityLayout, districtFrame, CITY_RINGS, type ParcelDef } from '../world/parcels';
+import { getCityLayout, districtFrame, CITY_RINGS, townPlan, townRiverX, type ParcelDef } from '../world/parcels';
 import { getCityscape } from '../world/cityscape';
 import { parcelState } from '../systems/property';
 import { getLighting } from '../core/timeOfDay';
@@ -12,7 +12,8 @@ import { hashString, mulberry32 } from '../core/rng';
 import { esc } from '../core/format';
 import { Mesh, STRIDE, hex, type RGB } from './mesh';
 import { MAIN_FS, MAIN_VS, SHADOW_FS, SHADOW_VS, GROUND_FS, GROUND_VS, SKY_FS, SKY_VS, POINT_FS, POINT_VS, LINE_FS, LINE_VS, STYLE as S } from './shaders';
-import { buildParcel, buildPark, buildSky, carModel, lampModel, treeModel, truckModel, type Glow, type Inst, type Out, type ParcelRender } from './models';
+import { autumnTint, buildParcel, buildPark, buildSky, carModel, hayModel, lampModel, pumpkinModel, treeModel, truckModel, type Glow, type Inst, type Out, type ParcelRender } from './models';
+import { seasonOn } from '../core/season';
 
 export interface CityPin { id: string; x: number; y: number; z: number; title: string; sub: string; cls: string }
 export interface CityViewOpts {
@@ -202,7 +203,8 @@ export function createCityView(o: CityViewOpts): CityView | null {
   }
   const G = { stat: makeGeo(), statDecal: makeGeo(), dyn: makeGeo(), dynDecal: makeGeo(), clear: makeGeo() };
   const scratch = new Mesh();
-  const I = { tree: makeInst(treeModel(scratch)), car: makeInst(carModel(scratch)), truck: makeInst(truckModel(scratch)), lamp: makeInst(lampModel(scratch)) };
+  const I = { tree: makeInst(treeModel(scratch)), car: makeInst(carModel(scratch)), truck: makeInst(truckModel(scratch)), lamp: makeInst(lampModel(scratch)), pumpkin: makeInst(pumpkinModel(scratch)), hay: makeInst(hayModel(scratch)) };
+  I.pumpkin.tall = 2; I.hay.tall = 3;
   // ground
   const groundVao = gl.createVertexArray()!, groundVb = gl.createBuffer()!;
   gl.bindVertexArray(groundVao);
@@ -251,6 +253,9 @@ export function createCityView(o: CityViewOpts): CityView | null {
   let parcelsList: ParcelDef[] = [];
   let boxes: { id: string; x0: number; z0: number; x1: number; z1: number; h: number }[] = [];
   let staticTrees: Inst[] = [], staticCars: Inst[] = [], staticTrucks: Inst[] = [], staticGlows: Glow[] = [];
+  let seasonPumpkins: Inst[] = [], seasonHay: Inst[] = [];
+  let fall = false, town = false;
+  let townU = { b: [0, 0, 0, 0], h: [0, 0, 0, 0] };
   let lastSig = '';
   let statChunks: Chunk[] = [], dynChunks: Chunk[] = [];
   let visStat: Chunk[] = [], visDyn: Chunk[] = [];
@@ -312,6 +317,12 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const R = 2 + CITY_RINGS;
     extent = { x0: -2 * px - 60, z0: -2 * py - 60, x1: f.totalW + 2 * px + 60, z1: f.totalH + 2 * py + 60 };
     const mx = f.totalW / 2, mz = f.totalH / 2;
+    town = !!f.town;
+    const plan = town ? townPlan(f) : null;
+    if (plan) {
+      extent = { x0: plan.x0 - 560, z0: plan.z0 - 330, x1: plan.x1 + 170, z1: plan.z1 + 80 };
+      townU = { b: [plan.x0 + 2, plan.z0 + 2, plan.x1 + 12, plan.z1 + 12], h: [plan.routeX, plan.mainZ, plan.oakZ, plan.riverBase] };
+    }
     // everything is grouped into patches so the renderer can skip whatever is off screen
     statChunks = [];
     const emitted: Record<string, (() => void)[]> = {};
@@ -342,7 +353,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const r = mulberry32(hashString('street:' + id));
 
     // far horizon so the city never just stops
-    const rimRings = detail === 0 ? 1 : 3;
+    const rimRings = town ? -R - f.BY : detail === 0 ? 1 : 3; // farmland runs to the horizon around a small town
     for (let j = -R - rimRings; j < f.BY + R + rimRings; j++) for (let i = -R - rimRings; i < f.BX + R + rimRings; i++) {
       if (i >= -R && i < f.BX + R && j >= -R && j < f.BY + R) continue;
       const bx = f.ST + i * px + 6, bz = f.ST + j * py + 6;
@@ -357,35 +368,77 @@ export function createCityView(o: CityViewOpts): CityView | null {
     // street trees, lamps and traffic follow the road grid
     const lampInst: Inst[] = [];
     const grey: RGB = [1, 1, 1];
-    const spanX = [-R * px, f.totalW + R * px], spanZ = [-R * py, f.totalH + R * py];
-    const treeKeep = detail === 2 ? 0.8 : detail === 1 ? 0.45 : 0.16;
-    const lampKeep = detail === 2 ? 1 : detail === 1 ? 0.7 : 0.3;
+    const spanX = plan ? [plan.x0, plan.x1] : [-R * px, f.totalW + R * px], spanZ = plan ? [plan.z0, plan.z1] : [-R * py, f.totalH + R * py];
+    const treeKeep = town ? (detail === 2 ? 0.55 : detail === 1 ? 0.32 : 0.1) : detail === 2 ? 0.8 : detail === 1 ? 0.45 : 0.16;
+    const lampKeep = town ? (detail === 2 ? 0.35 : 0.2) : detail === 2 ? 1 : detail === 1 ? 0.7 : 0.3;
+    const curb = town ? f.ST / 2 + 2.6 : 14, junction = town ? f.ST / 2 + 7 : 19;
     const glowLamp = (x: number, z: number, along: 0 | 1, side: number) => {
       const lx = along === 0 ? x : x - side * 2.2, lz = along === 0 ? z - side * 2.2 : z;
       staticGlows.push({ x: lx, y: 7.8, z: lz, c: [1, 0.78, 0.5], a: 0.9, size: 34 });
     };
     staticGlows = [];
-    const carsWanted = o.mobile() ? (Q === 0 ? 40 : 90) : Q >= 2 ? 240 : Q === 1 ? 130 : 60;
+    const carsWanted = town ? (Q === 0 ? 12 : 30) : o.mobile() ? (Q === 0 ? 40 : 90) : Q >= 2 ? 240 : Q === 1 ? 130 : 60;
     traffic = [];
     const streetsX: number[] = [], streetsZ: number[] = [];
-    for (let i = -R; i <= f.BX + R; i++) streetsX.push(i * px + f.ST / 2);
-    for (let j = -R; j <= f.BY + R; j++) streetsZ.push(j * py + f.ST / 2);
+    if (plan) {
+      for (let x = plan.x0 + f.ST / 2; x <= plan.x1 + f.ST; x += px) streetsX.push(x);
+      for (let z = plan.z0 + f.ST / 2; z <= plan.z1 + f.ST; z += py) streetsZ.push(z);
+    } else {
+      for (let i = -R; i <= f.BX + R; i++) streetsX.push(i * px + f.ST / 2);
+      for (let j = -R; j <= f.BY + R; j++) streetsZ.push(j * py + f.ST / 2);
+    }
     const nearCentre = (x: number, z: number) => Math.hypot(x - mx, z - mz) < (detail === 2 ? 1400 : 800);
     for (const x of streetsX) for (const side of [-1, 1]) for (let z = spanZ[0]; z < spanZ[1]; z += 14) {
       const k = Math.round((z - f.ST / 2) / py), dj = Math.abs(z - (k * py + f.ST / 2));
-      if (dj < 19 || inZone(x + side * 14, z, 2)) continue;
+      if (dj < junction || inZone(x + side * curb, z, 2)) continue;
       const lamp = ((Math.round(z / 14) % 2) + 2) % 2 === 1;
       if (lamp) {
-        if (r() < lampKeep && nearCentre(x, z)) { lampInst.push({ x: x + side * 14, y: 0, z: z, s: 1, yaw: side > 0 ? Math.PI / 2 : -Math.PI / 2, c: grey }); glowLamp(x + side * 14, z, 1, side); }
-      } else if (r() < treeKeep && nearCentre(x, z)) out.trees.push({ x: x + side * 14, y: 0, z, s: 0.62 + r() * 0.4, yaw: r() * 6.28, c: [0.3 + r() * 0.14, 0.45 + r() * 0.13, 0.19 + r() * 0.08] });
+        if (r() < lampKeep && nearCentre(x, z)) { lampInst.push({ x: x + side * curb, y: 0, z: z, s: 1, yaw: side > 0 ? Math.PI / 2 : -Math.PI / 2, c: grey }); glowLamp(x + side * curb, z, 1, side); }
+      } else if (r() < treeKeep && nearCentre(x, z)) out.trees.push({ x: x + side * curb, y: 0, z, s: 0.62 + r() * 0.4, yaw: r() * 6.28, c: [0.3 + r() * 0.14, 0.45 + r() * 0.13, 0.19 + r() * 0.08] });
     }
     for (const z of streetsZ) for (const side of [-1, 1]) for (let x = spanX[0]; x < spanX[1]; x += 14) {
       const k = Math.round((x - f.ST / 2) / px), dj = Math.abs(x - (k * px + f.ST / 2));
-      if (dj < 19 || inZone(x, z + side * 14, 2)) continue;
+      if (dj < junction || inZone(x, z + side * curb, 2)) continue;
       const lamp = ((Math.round(x / 14) % 2) + 2) % 2 === 1;
       if (lamp) {
-        if (r() < lampKeep && nearCentre(x, z)) { lampInst.push({ x, y: 0, z: z + side * 14, s: 1, yaw: side > 0 ? Math.PI : 0, c: grey }); glowLamp(x, z + side * 14, 0, side); }
-      } else if (r() < treeKeep && nearCentre(x, z)) out.trees.push({ x, y: 0, z: z + side * 14, s: 0.62 + r() * 0.4, yaw: r() * 6.28, c: [0.3 + r() * 0.14, 0.45 + r() * 0.13, 0.19 + r() * 0.08] });
+        if (r() < lampKeep && nearCentre(x, z)) { lampInst.push({ x, y: 0, z: z + side * curb, s: 1, yaw: side > 0 ? Math.PI : 0, c: grey }); glowLamp(x, z + side * curb, 0, side); }
+      } else if (r() < treeKeep && nearCentre(x, z)) out.trees.push({ x, y: 0, z: z + side * curb, s: 0.62 + r() * 0.4, yaw: r() * 6.28, c: [0.3 + r() * 0.14, 0.45 + r() * 0.13, 0.19 + r() * 0.08] });
+    }
+    if (plan) {
+      // tree lines along the Little Wabash, and a steel bridge where Main Street crosses it
+      const keep = detail === 2 ? 0.8 : detail === 1 ? 0.5 : 0.2;
+      for (let z = extent.z0 - 300; z < extent.z1 + 300; z += 13) for (const side of [-1, 1]) if (r() < keep && Math.abs(z - plan.mainZ) > 24) {
+        out.trees.push({ x: townRiverX(z, plan.riverBase) + side * (31 + r() * 34), y: 0, z, s: 0.9 + r() * 0.7, yaw: r() * 6.28, c: [0.26 + r() * 0.12, 0.4 + r() * 0.12, 0.16 + r() * 0.07] });
+      }
+      const bx = townRiverX(plan.mainZ, plan.riverBase);
+      queue(bx - 34, plan.mainZ - 9, bx + 34, plan.mainZ + 9, 5, () => {
+        const steel: RGB = [0.42, 0.47, 0.5], sm = { st: S.plain, seed: 0.4 };
+        for (const dz of [-6.2, 5.9]) {
+          out.m.box(bx - 34, 0, plan.mainZ + dz, bx + 34, 1.1, plan.mainZ + dz + 0.3, steel, sm, undefined, 1);
+          for (let k = -32; k <= 32; k += 8) out.m.box(bx + k, 0, plan.mainZ + dz, bx + k + 0.3, 4, plan.mainZ + dz + 0.3, steel, sm, undefined, 1);
+          out.m.box(bx - 34, 3.8, plan.mainZ + dz, bx + 34, 4.2, plan.mainZ + dz + 0.3, steel, sm, undefined, 1);
+        }
+      });
+    }
+    // Thanksgiving: pumpkins and hay bales at the kerb, thinned out by graphics quality
+    seasonPumpkins = []; seasonHay = [];
+    {
+      const rs = mulberry32(hashString('season:' + id));
+      const wanted = town ? (detail === 2 ? 240 : detail === 1 ? 120 : 45) : detail === 2 ? 320 : detail === 1 ? 150 : 50;
+      const near = town ? 620 : 900;
+      const skinC: RGB[] = [[0.85, 0.43, 0.08], [0.9, 0.5, 0.1], [0.78, 0.36, 0.07], [0.86, 0.6, 0.2]];
+      for (let i = 0; i < wanted; i++) {
+        const along = rs() < 0.5;
+        const line = along ? streetsZ[Math.floor(rs() * streetsZ.length)] : streetsX[Math.floor(rs() * streetsX.length)];
+        const u = (along ? spanX[0] + rs() * (spanX[1] - spanX[0]) : spanZ[0] + rs() * (spanZ[1] - spanZ[0]));
+        const side = rs() < 0.5 ? -1 : 1, off = town ? curb + 1.2 : 15.5;
+        const x = along ? u : line + side * off, z = along ? line + side * off : u;
+        const period = along ? px : py, base = along ? x : z;
+        const dj = Math.abs(base - (Math.round((base - f.ST / 2) / period) * period + f.ST / 2));
+        if (dj < junction + 2 || Math.hypot(x - mx, z - mz) > near || inZone(x, z, 3)) continue;
+        seasonHay.push({ x, y: 0, z, s: 1.3, yaw: along ? 0 : Math.PI / 2, c: [0.76, 0.62, 0.33] });
+        for (let k = 0; k < 3; k++) seasonPumpkins.push({ x: x + (rs() - 0.5) * 2.8, y: 0, z: z + (rs() - 0.5) * 2.8, s: 0.8 + rs() * 0.7, yaw: rs() * 6.28, c: skinC[Math.floor(rs() * skinC.length)] });
+      }
     }
     // streets running through a development zone are closed to traffic
     const openX = streetsX.filter((x) => !zoneRects.some((q) => x > q.x0 && x < q.x1));
@@ -395,7 +448,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
       const line = list[Math.floor(r() * list.length)];
       if (line === undefined) continue;
       const dir = r() < 0.5 ? 1 : -1;
-      const lane = dir * (r() < 0.5 ? 2.8 : 8.2);
+      const lane = town ? dir * 2.5 : dir * (r() < 0.5 ? 2.8 : 8.2);
       const [a, b] = axis === 0 ? spanX : spanZ;
       traffic.push({ axis, line, lane, dir, speed: 8 + r() * 6, t: r(), a, b });
     }
@@ -455,14 +508,14 @@ export function createCityView(o: CityViewOpts): CityView | null {
     let k = `${info.status}:${info.owner ?? ''}:${st?.mergedInto ?? ''}:${info.xray ? 1 : 0}:${info.color ?? ''}:${info.bp ?? ''}`;
     if (info.owner === 'player') k += `:${s.company.color}`;
     const f = st?.facilityId ? s.facilities[st.facilityId] : undefined;
-    if (f) { k += `:${f.color}:${f.floors}:${f.footprint}:${f.style}:${f.blueprintId}`; for (const id in f.equipment) k += `,${id}${f.equipment[id]}`; if (f.isHQ) k += `:hq${s.company.hqTier}`; }
+    if (f) { k += `:${f.color}:${f.floors}:${f.footprint}:${f.style}:${f.blueprintId}:${f.hookups ? `${f.hookups.power === 0}${f.hookups.net === 0}` : ''}`; for (const id in f.equipment) k += `,${id}${f.equipment[id]}`; if (f.isHQ) k += `:hq${s.company.hqTier}`; }
     if (info.status === 'construction' || info.status === 'demolishing') k += `:${Math.floor(info.progress * 20)}`;
     return k;
   }
 
   function signature(): string {
     const s = o.getS();
-    let sig = '';
+    let sig = seasonOn(s.settings.seasonal) ? 'fall;' : '';
     for (const p of parcelsList) {
       if (!s.parcels[p.id]) continue;
       sig += `${p.id}=${parcelKey(p, renderInfo(p))};`;
@@ -534,7 +587,24 @@ export function createCityView(o: CityViewOpts): CityView | null {
     upload(G.dyn, merged.m, gl!.DYNAMIC_DRAW);
     upload(G.dynDecal, merged.decal, gl!.DYNAMIC_DRAW);
     upload(G.clear, merged.clear, gl!.DYNAMIC_DRAW);
-    setInst(I.tree, [...staticTrees, ...out.trees]);
+    // Fall colours are only a change of tint on the same trees, so they cost nothing to draw.
+    fall = seasonOn(s.settings.seasonal);
+    const allTrees = [...staticTrees, ...out.trees];
+    setInst(I.tree, fall ? allTrees.map((q) => ({ ...q, c: autumnTint(q.x, q.z) })) : allTrees);
+    if (fall) {
+      // every site you own gets a small display by the gate
+      const dressP: Inst[] = [], dressH: Inst[] = [];
+      for (const b of list) {
+        const st = s.parcels[b.id];
+        if (st?.owner !== 'player') continue;
+        dressH.push({ x: b.x0 + 3, y: 0, z: b.z1 - 2, s: 1.3, yaw: 0, c: [0.76, 0.62, 0.33] }, { x: b.x1 - 3, y: 0, z: b.z1 - 2, s: 1.3, yaw: 0, c: [0.76, 0.62, 0.33] });
+        for (let k = 0; k < 5; k++) dressP.push({ x: b.x0 + 1.6 + k * 0.8, y: 0, z: b.z1 - 1, s: 0.85 + (k % 3) * 0.25, yaw: k * 1.7, c: k % 2 ? [0.85, 0.43, 0.08] : [0.9, 0.52, 0.12] });
+      }
+      setInst(I.pumpkin, [...seasonPumpkins, ...dressP]);
+      setInst(I.hay, [...seasonHay, ...dressH]);
+    } else {
+      I.pumpkin.instances = 0; I.hay.instances = 0; I.pumpkin.ranges = []; I.hay.ranges = [];
+    }
     const parked = [...staticCars, ...out.cars];
     parkedCount = parked.length;
     setInst(I.car, parked, traffic.length);
@@ -628,7 +698,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
       if (sx < -60 || sy < -40 || sx > W + 60 || sy > H + 40) { if (p.el.style.display !== 'none') p.el.style.display = 'none'; continue; }
       if (p.el.style.display) p.el.style.display = '';
       // keep name tags readable at the screen edges
-      const px = Math.max(62, Math.min(W - 62, sx)), py = Math.max(44, sy);
+      const px = Math.max(92, Math.min(W - 92, sx)), py = Math.max(44, sy);
       p.el.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px)`;
       // full label only where there's room; otherwise it shrinks to a dot and expands on approach
       const hit = placed.some((q) => Math.abs(q[0] - px) < 118 && Math.abs(q[1] - py) < 36);
@@ -780,6 +850,7 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.uniform1f(u.uNight ?? null, lightUse.night);
     gl!.uniform1f(u.uTime ?? null, t);
     gl!.uniform1f(u.uFogK ?? null, 1 / 2500);
+    gl!.uniform1f(u.uAutumn ?? null, fall ? 1 : 0);
     if (u.uShadow) {
       gl!.uniformMatrix4fv(u.uSunVP ?? null, false, sunVP);
       gl!.activeTexture(gl!.TEXTURE0);
@@ -955,6 +1026,8 @@ export function createCityView(o: CityViewOpts): CityView | null {
     const sun = nrm([Math.cos(L.sunAzimuth) * ce, elev, Math.sin(L.sunAzimuth) * ce]);
     const sunUp = L.sunElevation > 0.02 && L.sunIntensity > 0.05;
     const sc = srgb(hex(L.sunColor)).map((v) => v * Math.max(0.16, Math.min(1.15, L.sunIntensity)));
+    // low autumn sun: a touch warmer, never brighter
+    if (fall) { sc[0] *= 1.02; sc[1] *= 0.98; sc[2] *= 0.92; }
     const top = srgb(hex(L.sky.top)), hor = srgb(hex(L.sky.horizon)), gnd = srgb(hex(L.sky.ground));
     if (shadowFb && sunUp) {
       const moved = Math.hypot(cam.x - shadowCenter[0], cam.z - shadowCenter[1]) > shadowExt * 0.14 || Math.abs(Math.max(240, Math.min(1000, cam.dist * 1.5)) - shadowExt) > shadowExt * 0.14 || dot(sun, shadowSun) < 0.99993;
@@ -984,12 +1057,17 @@ export function createCityView(o: CityViewOpts): CityView | null {
     gl!.useProgram(P.inst.p);
     sharedUniforms(P.inst, sun, sc, top, hor, gnd, time, on);
     drawnInst = 0;
-    drawInstanced([I.tree, I.car, I.truck, I.lamp], viewPlanes);
+    // small props only draw up close: from far away they are less than a pixel
+    drawInstanced(fall && cam.dist < 520 ? [I.tree, I.car, I.truck, I.lamp, I.pumpkin, I.hay] : [I.tree, I.car, I.truck, I.lamp], viewPlanes);
     // ground
     gl!.useProgram(P.ground.p);
     sharedUniforms(P.ground, sun, sc, top, hor, gnd, time, on);
     gl!.uniform2f(P.ground.u.uGrid, frame!.BW + frame!.ST, frame!.BH + frame!.ST);
     gl!.uniform1f(P.ground.u.uSt, frame!.ST);
+    gl!.uniform2f(P.ground.u.uRoad ?? null, town ? frame!.ST / 2 - 1.5 : 11, town ? frame!.ST / 2 + 2.2 : 17);
+    gl!.uniform1f(P.ground.u.uTownOn ?? null, town ? 1 : 0);
+    gl!.uniform4fv(P.ground.u.uTownB ?? null, townU.b);
+    gl!.uniform4fv(P.ground.u.uHwy ?? null, townU.h);
     gl!.enable(gl!.POLYGON_OFFSET_FILL); gl!.polygonOffset(3, 3);
     gl!.bindVertexArray(groundVao);
     gl!.drawArrays(gl!.TRIANGLES, 0, 6);

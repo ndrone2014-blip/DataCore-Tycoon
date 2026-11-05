@@ -20,6 +20,7 @@ import { pushNews } from './ledger';
 import { generateOffer } from './contracts';
 import { deriveAll } from './derive';
 import { rivalFiber } from './fiber';
+import { hasFeature, rivalRevenueMult } from './careerCore';
 
 const cuPerSlot = (tech: number) => 40 * Math.pow(1.35, tech);
 const costPerCu = (tech: number) => 430 / (1 + tech * 0.08);
@@ -58,7 +59,7 @@ function choosePlot(s: GameState, c: Competitor, city: CityDef, minArea: number,
   const lay = getCityLayout(city.id);
   const free = lay.parcels.filter((p) => {
     const st = s.parcels[p.id];
-    return (!st || !st.owner) && p.area >= minArea && p.area <= maxArea && p.type !== 'premium' && landValue(s, p.id) <= budget;
+    return (!st || !st.owner) && p.id !== s.company.startParcel && p.area >= minArea && p.area <= maxArea && p.type !== 'premium' && landValue(s, p.id) <= budget;
   });
   if (!free.length) return undefined;
   // frugal companies prefer cheap land per m^2, others prefer bigger lots
@@ -82,7 +83,7 @@ function pickBlueprint(c: Competitor, area: number, budget: number): BlueprintDe
 
 function allowedCities(s: GameState, c: Competitor): CityDef[] {
   const reach = 1 + s.gameHours / (260 / c.aggression) + c.techLevel * 1.5;
-  return CITIES.filter((x) => x.unlockLevel <= reach);
+  return CITIES.filter((x) => x.unlockLevel <= reach && !x.town); // national rivals skip small towns
 }
 
 /** Hardware market conditions hit rivals through the same events that hit the player. */
@@ -266,6 +267,7 @@ export function tickCompetitors(s: GameState, dt: number, realDt: number, der: D
       cu += site.cu;
     }
     rev += der.net.rivalTransit[c.id] ?? 0;
+    rev *= rivalRevenueMult(s);
     const exp = (cu * 0.07 * (1 - (c.frugality - 1) * 0.15)) / (1 + c.techLevel * 0.12) + c.sites.length * 60;
     c.revenueHr = rev;
     c.expenseHr = exp;
@@ -383,6 +385,7 @@ export const dealPausedFor = (s: GameState, compId: string) => Math.max(0, (s.de
 
 /** Make a takeover offer. A rejected offer pauses talks and makes them ask for more next time. */
 export function makeOffer(s: GameState, compId: string, tierId: string): { ok: boolean; reason?: string; accepted?: boolean } {
+  if (!hasFeature(s, 'g_deals')) return { ok: false, reason: 'Takeovers unlock with Major Business Opportunities' };
   const c = s.competitors.find((x) => x.id === compId);
   const tier = OFFER_TIERS.find((t) => t.id === tierId);
   if (!c || !tier) return { ok: false, reason: 'Company no longer exists' };
@@ -416,6 +419,7 @@ export function siteQuote(s: GameState, compId: string, parcelId: string): { ok:
 
 /** Buy a single running data center out of a rival's portfolio. */
 export function buySite(s: GameState, compId: string, parcelId: string): { ok: boolean; reason?: string } {
+  if (!hasFeature(s, 'g_deals')) return { ok: false, reason: 'Buying rival sites unlocks with Major Business Opportunities' };
   const q = siteQuote(s, compId, parcelId);
   if (!q.ok) return q;
   const c = s.competitors.find((x) => x.id === compId)!;

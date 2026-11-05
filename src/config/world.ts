@@ -28,6 +28,8 @@ export interface CityDef {
   unlockLevel: number;
   license: number; // one-time market-entry license fee
   blurb: string;
+  /** Small town: its own street plan, low-rise buildings and farmland instead of a metro grid. */
+  town?: boolean;
 }
 
 export const COUNTRIES: CountryDef[] = [
@@ -51,6 +53,7 @@ export const CITIES: CityDef[] = [
   { id: 'phoenix', name: 'Phoenix', country: 'US', region: 'North America', center: [-112.07, 33.45], district: [-111.885, 33.3], districtName: 'Chandler Compute Park', landMult: 0.7, powerPrice: 0.1, constructionMult: 0.92, demand: 7000, tax: 0.016, grid: 0.88, unlockLevel: 3, license: 150_000, blurb: 'Fast-growing desert hub. Cheap land, brutal heat.' },
   { id: 'newyork', name: 'New York', country: 'US', region: 'North America', center: [-74.006, 40.713], district: [-74.065, 40.786], districtName: 'Secaucus Interconnect Zone', landMult: 2.1, powerPrice: 0.17, constructionMult: 1.35, demand: 13000, tax: 0.024, grid: 0.9, unlockLevel: 4, license: 600_000, blurb: 'Financial capital. Premium prices, premium customers.' },
   { id: 'losangeles', name: 'Los Angeles', country: 'US', region: 'North America', center: [-118.24, 34.05], district: [-118.395, 33.922], districtName: 'El Segundo Edge District', landMult: 1.9, powerPrice: 0.19, constructionMult: 1.3, demand: 11000, tax: 0.012, grid: 0.85, unlockLevel: 4, license: 550_000, blurb: 'Media and Pacific cable landing hub.' },
+  { id: 'carmi', name: 'Carmi', country: 'US', region: 'North America', center: [-88.172, 38.0861], district: [-88.172, 38.0861], districtName: 'White County, Illinois', landMult: 0.42, powerPrice: 0.085, constructionMult: 0.82, demand: 900, tax: 0.024, grid: 0.84, unlockLevel: 1, license: 0, town: true, blurb: 'A small Illinois town on the Little Wabash River. Dirt-cheap land and low-cost power, but a tiny local market that fills up fast.' },
   // ---- Canada ----
   { id: 'toronto', name: 'Toronto', country: 'CA', region: 'North America', center: [-79.38, 43.65], district: [-79.33, 43.856], districtName: 'Markham Server Park', landMult: 1.1, powerPrice: 0.08, constructionMult: 1.05, demand: 7500, tax: 0.015, grid: 0.95, unlockLevel: 5, license: 900_000, blurb: 'Clean hydro power and a cool climate.' },
   // ---- Europe ----

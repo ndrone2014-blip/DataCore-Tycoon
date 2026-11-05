@@ -10,6 +10,7 @@ import { emit, sfx, toast } from '../core/bus';
 import { money } from '../core/format';
 import type { Effects } from '../config/research';
 import { getEffects } from './modifiers';
+import { hasFeature, revenueMult } from './careerCore';
 
 export interface CityNet { links: number; hub: number; intl: number; score: number; connectCut: number; spotBonus: number; contractBonus: number }
 export interface NetStats { city: Record<string, CityNet>; transitHr: number; upkeepHr: number; value: number; byRoute: Record<string, number>; rivalTransit: Record<string, number>; coverage: Record<string, number> }
@@ -24,6 +25,8 @@ export function netStats(s: GameState): NetStats {
   let key = '';
   for (const r of s.fiber.routes) key += r.doneAt <= s.gameHours ? `${r.id}${r.tier}${r.owner};` : '';
   for (const c in s.fiber.hubs) key += `${c}${s.fiber.hubs[c]},`;
+  const revK = revenueMult(s);
+  key += `|${revK}`;
   const had = cache.get(s);
   if (had?.key === key) return had.net;
   const net: NetStats = { city: {}, transitHr: 0, upkeepHr: 0, value: 0, byRoute: {}, rivalTransit: {}, coverage: {} };
@@ -38,7 +41,7 @@ export function netStats(s: GameState): NetStats {
     for (const r of routes) {
       const hubK = 1 + 0.15 * ((s.fiber.hubs[l.a] ?? 0) + (s.fiber.hubs[l.b] ?? 0));
       const netHub = r.owner === 'player' ? hubK : 1;
-      const income = pool * tierWeight(r.tier) * (tierWeight(r.tier) / total) * netHub;
+      const income = pool * tierWeight(r.tier) * (tierWeight(r.tier) / total) * netHub * (r.owner === 'player' ? revK : 1);
       if (r.owner === 'player') {
         net.byRoute[r.id] = income;
         net.transitHr += income;
@@ -87,6 +90,7 @@ export function routeQuote(s: GameState, linkId: string): { ok: boolean; reason?
   if (mine && mine.doneAt > s.gameHours) return { ok: false, reason: 'Construction in progress', cost, hours, tier };
   if (tier > MAX_FIBER_TIER) return { ok: false, reason: 'Maximum capacity reached', cost, hours, tier };
   const need = FIBER_KIND[l.kind].level;
+  if (l.kind !== 'regional' && !hasFeature(s, 'g_net_strategy')) return { ok: false, reason: 'Long-haul routes unlock with Advanced Network Strategy', cost, hours, tier };
   if (s.level < need) return { ok: false, reason: `Requires level ${need}`, cost, hours, tier };
   for (const c of [l.a, l.b]) if (!s.unlockedCities.includes(c)) return { ok: false, reason: `Unlock ${cityById(c).name} first`, cost, hours, tier };
   if (!canAfford(s, cost)) return { ok: false, reason: `Need ${money(cost)}`, cost, hours, tier };
@@ -117,6 +121,7 @@ export function buildRoute(s: GameState, linkId: string): { ok: boolean; reason?
 export function hubQuote(s: GameState, cityId: string): { ok: boolean; reason?: string; cost: number; next?: (typeof HUB_LEVELS)[number] } {
   const next = HUB_LEVELS[s.fiber.hubs[cityId] ?? 0];
   if (!next) return { ok: false, reason: 'Fully developed', cost: 0 };
+  if (!hasFeature(s, 'g_network')) return { ok: false, reason: 'Unlocks with Network Operations', cost: 0 };
   const cost = Math.round(next.cost * cityById(cityId).constructionMult);
   if (s.level < next.level_req) return { ok: false, reason: `Requires level ${next.level_req}`, cost, next };
   if (!s.unlockedCities.includes(cityId)) return { ok: false, reason: 'Unlock this market first', cost, next };

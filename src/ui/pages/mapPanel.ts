@@ -17,6 +17,8 @@ import { staffCap } from '../../systems/employees';
 import { isMobile } from '../../core/device';
 import { COUNTRY_RULES, citySpecById } from '../../config/expansion';
 import { cityMods } from '../../systems/regulation';
+import { hasFeature, isCareer, STAGES } from '../../systems/career';
+import { hookupCard, loanCards } from './progress';
 
 export function renderMapPanel(app: App): string {
   const m = app.map;
@@ -35,7 +37,7 @@ function cityRow(app: App, id: string): string {
   const comps = s.competitors.filter((x) => x.sites.some((y) => y.cityId === id));
   return `<button class="list-row ${unlocked ? '' : 'locked'}" data-act="mapCity" data-id="${id}">
     <span class="flag">${countryById(c.country).flag}</span>
-    <span class="grow"><b>${esc(c.name)}</b><small>${unlocked ? `${mine} facilities · market ${Math.round((app.d.cityPrice[id] ?? 1) * 100)}%` : `🔒 Level ${c.unlockLevel}${c.license ? ` · ${money(licenseFee(app.s, c.id))}` : ''}`}</small></span>
+    <span class="grow"><b>${esc(c.name)}</b><small>${unlocked ? `${mine} facilities · market ${Math.round((app.d.cityPrice[id] ?? 1) * 100)}%` : !hasFeature(s, 'g_stage2') ? `🔒 ${STAGES[2].name} status` : `🔒 Level ${c.unlockLevel}${licenseFee(s, c.id) ? ` · ${money(licenseFee(s, c.id))}` : ''}`}</small></span>
     <span class="dots">${comps.map((x) => `<i style="background:${x.color}" title="${esc(x.name)}"></i>`).join('')}</span>
   </button>`;
 }
@@ -45,6 +47,7 @@ function marketsCard(app: App): string {
   const s = app.s;
   const locked = CITIES.filter((c) => !s.unlockedCities.includes(c.id)).sort((a, b) => a.unlockLevel - b.unlockLevel || a.license - b.license);
   if (!locked.length) return '';
+  if (!hasFeature(s, 'g_stage2')) return `<div class="card markets-card"><h3>🔓 New cities</h3><p class="small muted">Your company has one market for now. Every other city opens once you reach <b>${STAGES[2].name}</b> status. Check Company Progress to see how close you are.</p></div>`;
   const ready = locked.filter((c) => s.level >= c.unlockLevel);
   const next = locked.filter((c) => s.level < c.unlockLevel).slice(0, 2);
   return `<div class="card markets-card">
@@ -126,6 +129,7 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
   const supply = d.citySupply[cityId] ?? 0, demand = d.cityDemand[cityId] ?? 1;
   const filter = app.ui.mapFilter ?? 'all';
   const avail = lay.parcels
+    .filter((p) => hasFeature(s, 'g_profit') || p.id === s.company.startParcel)
     .filter((p) => !parcelState(s, p.id).owner && (filter === 'all' || p.type === filter))
     .map((p) => ({ p, price: landValue(s, p.id) }))
     .sort((a, b) => a.price - b.price)
@@ -135,9 +139,9 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
   const rule = COUNTRY_RULES[city.country], mods = cityMods(s, cityId), spec = s.citySpec[cityId] ? citySpecById(s.citySpec[cityId].spec) : undefined;
   const rulesCard = `<div class="callout small rules-card"><b>🏛️ ${esc(rule?.label ?? 'Local rules')}</b>${spec ? ` · ${spec.icon} ${esc(spec.name)}` : ''}<br><small>${esc(rule?.note ?? '')} Tax ${pct(mods.taxMult)} · permits ${pct(mods.permitCost)} cost, ${pct(mods.permitTime)} time · PUE limit ${mods.pueLimit >= 9 ? 'none' : mods.pueLimit.toFixed(2)}${mods.privacyTier ? ` · privacy tier ${mods.privacyTier}` : ''}.</small></div>`;
   return `
-    <div class="panel-head"><h2>${countryById(city.country).flag} ${esc(city.name)}</h2><p class="muted">${esc(city.districtName)} · ${lay.parcels.length} parcels · ${lay.zones.length} development zones</p></div>
+    <div class="panel-head"><h2>${countryById(city.country).flag} ${esc(city.name)}</h2><p class="muted">${esc(city.districtName)} · ${lay.parcels.length} parcels · ${lay.zones.length} development zones</p>${city.town ? `<p class="small muted">${esc(city.blurb)}</p>` : ''}</div>
     ${rulesCard}
-    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${s.level < city.unlockLevel ? `Reach company level ${city.unlockLevel} (you are level ${s.level}), then buy the market license.` : 'Buy the market license to start building here.'} ${btn(`Buy market license ${money(licenseFee(app.s, city.id))}`, 'unlockCity', { id: cityId }, 'warn sm', s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < licenseFee(app.s, city.id) ? `Need ${money(licenseFee(app.s, city.id))}` : undefined)}</div>`}
+    ${unlocked ? '' : `<div class="callout warn">🔒 This market is locked. ${!hasFeature(s, 'g_stage2') ? `It opens when your company reaches ${STAGES[2].name} status.` : s.level < city.unlockLevel ? `Reach company level ${city.unlockLevel} (you are level ${s.level}), then buy the market license.` : 'Buy the market license to start building here.'} ${btn(`Buy market license ${money(licenseFee(app.s, city.id))}`, 'unlockCity', { id: cityId }, 'warn sm', !hasFeature(s, 'g_stage2') ? `Requires ${STAGES[2].name} status` : s.level < city.unlockLevel ? `Requires level ${city.unlockLevel}` : s.cash < licenseFee(app.s, city.id) ? `Need ${money(licenseFee(app.s, city.id))}` : undefined)}</div>`}
     <div class="card">
       <div class="row between"><b>Market</b><small class="muted">Spot price ${pct(d.cityPrice[cityId] ?? 1)}</small></div>
       ${bar(Math.min(1, supply / demand), supply / demand > 0.9 ? 'warn' : '', `Supply ${num(supply)} / demand ${num(demand)} CU`)}
@@ -145,7 +149,7 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
     </div>
     ${zone ? zoneCard(app, zone.id, true) : ''}
     <h4 class="sect">Development zones</h4>
-    ${lay.zones.map((z) => zoneCard(app, z.id, false)).join('')}
+    ${hasFeature(s, 'g_zones') ? lay.zones.map((z) => zoneCard(app, z.id, false)).join('') : `<p class="muted small">🔒 ${lay.zones.length} zones here. Buying whole zones unlocks with Large Development Projects.</p>`}
     <h4 class="sect">Your properties here (${mine.length})</h4>
     ${mine.length ? mine.map(([pid, ps]) => {
       const p = getParcel(pid)!;
@@ -155,6 +159,7 @@ function cityPanel(app: App, cityId: string, zoneId: string | null): string {
     }).join('') : `<p class="muted small">None yet. ${isMobile() ? 'Tap' : 'Click'} any building in the city to see its price.</p>`}
     <h4 class="sect row between">Cheapest available lots
       <select data-change="mapFilter" class="sel-sm">${['all', 'empty_lot', 'retail', 'restaurant', 'warehouse', 'office', 'industrial', 'industrial_land', 'shopping_center', 'premium'].map((t) => `<option value="${t}" ${filter === t ? 'selected' : ''}>${t === 'all' ? 'All types' : PROPERTY_TYPE_INFO[t as keyof typeof PROPERTY_TYPE_INFO].label}</option>`).join('')}</select></h4>
+ ${!hasFeature(s, 'g_profit') ? `<p class="small muted">Only one property is on the market for a company with no track record. Get your first data center profitable and the rest of ${esc(city.name)} opens up.</p>` : ''}
     ${avail.map(({ p, price }) => `<button class="list-row" data-act="mapProp" data-id="${p.id}"><span class="flag">${PROPERTY_TYPE_INFO[p.type].icon}</span><span class="grow"><b>${esc(p.name)}</b><small>${PROPERTY_TYPE_INFO[p.type].label} · ${area(p.area)}${p.zoneId ? ' · in zone' : ''}</small></span><b class="price">${money(price)}</b></button>`).join('') || '<p class="muted small">No lots match.</p>'}`;
 }
 
@@ -218,6 +223,7 @@ function propertyPanel(app: App, p: ParcelDef): string {
   if (!st.owner) {
     const cb = canBuy(s, p.id);
     actions = `<div class="buy-box"><div><label>Purchase price</label><b class="price-big">${money(price)}</b></div>${btn('Buy property', 'buyParcel', { id: p.id }, 'primary lg', cb.ok ? undefined : cb.reason)}</div>`;
+    if (!cb.ok && cb.reason) actions += `<p class="small muted buy-why">${esc(cb.reason)}.</p>${isCareer(s) && p.id === s.company.startParcel && !hasFeature(s, 'g_property') ? '<button class="btn primary mt" data-act="nav" data-page="dashboard">🧰 Find freelance work</button>' : ''}`;
     if (zone && !p.isSite) {
       const zq = zoneQuote(s, zone.id);
       actions += `<div class="row between mt small"><span>Part of <b>${esc(zone.name)}</b> (${zone.parcelIds.length} lots)</span>${btn(`Buy zone ${zq.price ? money(zq.price) : ''}`, 'buyZone', { id: zone.id }, 'ghost sm', zq.ok ? undefined : zq.reason)}</div>`;
@@ -229,16 +235,17 @@ function propertyPanel(app: App, p: ParcelDef): string {
     actions = `<div class="action-grid">
       <button class="btn danger lg" data-act="demolish" data-id="${p.id}" ${s.cash < demo ? `disabled title="Need ${money(demo)}"` : ''}>🧱 Demolish building<br><small>${money(demo)} · ~${duration(demolitionSeconds(p))}</small></button>
       ${canSell(s, p.id).ok ? `<button class="btn ghost" data-act="sellParcel" data-id="${p.id}">Sell for ${money(price * 0.85)}</button>` : ''}
-    </div><p class="small muted">Demolish the existing ${info.label.toLowerCase()} to clear the site for a data center.</p>`;
+    </div>${s.cash < demo ? `<p class="small muted buy-why">You need ${money(demo)} to demolish it.</p>` : ''}<p class="small muted">Demolish the existing ${info.label.toLowerCase()} to clear the site for a data center.</p>`;
   } else if ((st.status === 'demolishing' || st.status === 'construction') && pr) {
     actions = projectCard(app, pr, true);
   } else if (st.status === 'cleared') {
     const hq = hqQuote(s, p.id);
     actions = `<div class="action-grid">
       <button class="btn primary lg" data-act="openBuild" data-id="${p.id}">🏗️ Build data center<br><small>Premade or custom design</small></button>
-      ${!s.company.hqFacility ? `<button class="btn ghost" data-act="buildHQ" data-id="${p.id}" ${hq.ok ? '' : `disabled title="${esc(hq.reasons[0] ?? '')}"`}>🏢 Build headquarters · ${money(hq.cost)}</button>` : ''}
+      ${!s.company.hqFacility && hasFeature(s, 'g_profit') ? `<button class="btn ghost" data-act="buildHQ" data-id="${p.id}" ${hq.ok ? '' : `disabled title="${esc(hq.reasons[0] ?? '')}"`}>🏢 Build headquarters · ${money(hq.cost)}</button>` : ''}
       ${canSell(s, p.id).ok ? `<button class="btn ghost" data-act="sellParcel" data-id="${p.id}">Sell for ${money(price * 0.85)}</button>` : ''}
     </div>`;
+    actions += loanCards(app);
     if (zone && !p.isSite) {
       const cq = consolidateQuote(s, zone.id);
       if (zone.parcelIds.every((pid) => parcelState(s, pid).owner === 'player')) actions += `<div class="row between mt small"><span>You own the whole zone.</span>${btn('Consolidate zone', 'consolidate', { id: zone.id }, 'ghost sm', cq.ok ? undefined : cq.reason)}</div>`;
@@ -246,7 +253,7 @@ function propertyPanel(app: App, p: ParcelDef): string {
   } else if (st.status === 'facility' && st.facilityId) {
     const f = s.facilities[st.facilityId];
     const fs = d.fac[f.id];
-    actions = `<div class="card">
+    actions = `${hookupCard(app, f)}${loanCards(app)}<div class="card">
       <div class="row between"><h3>🖥️ ${esc(f.name)}</h3><span class="tag ${fs.warnings.length ? 'bad' : 'ok'}">${fs.warnings.length ? '⚠ ' + esc(fs.warnings[0]) : 'Healthy'}</span></div>
       <div class="grid3 mini-stats">
         <div><label>Revenue/h</label><b class="pos">${money(fs.revenueHr)}</b></div>
@@ -257,7 +264,7 @@ function propertyPanel(app: App, p: ParcelDef): string {
       ${gauge(fs.itLoad, fs.powerCap, 'Power', `${power(fs.itLoad)} / ${power(fs.powerCap)}`)}
       ${gauge(fs.itLoad, fs.coolingCap, 'Cooling', `${power(fs.itLoad)} / ${power(fs.coolingCap)}`)}
       <div class="kv small">${(['cpu', 'gpu', 'storage'] as const).map((c) => `<span>${CAP_LABEL[c].name}</span><b>${num(fs.delivered[c])} ${CAP_LABEL[c].unit}</b>`).join('')}</div>
-      <div class="row gap mt wrap"><button class="btn primary" data-act="autoEquip" data-id="${f.id}" data-k="0.5" ${fs.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled title="No free slots or not enough cash"' : ''}>⚡ Auto-equip (${money(Math.max(0, s.cash) * 0.5)})</button><button class="btn ghost" data-act="manageDC" data-id="${f.id}">Manage facility</button></div>
+      <div class="row gap mt wrap">${hasFeature(s, 'g_stage2') ? `<button class="btn primary" data-act="autoEquip" data-id="${f.id}" data-k="0.5" ${fs.slotsUsed >= f.slots || s.cash < 20000 ? 'disabled title="No free slots or not enough cash"' : ''}>⚡ Auto-equip (${money(Math.max(0, s.cash) * 0.5)})</button>` : ''}<button class="btn ${hasFeature(s, 'g_stage2') ? 'ghost' : 'primary'}" data-act="manageDC" data-id="${f.id}">Manage facility</button></div>
     </div>`;
   } else if (st.status === 'hq') {
     const q = hqUpgradeQuote(s);

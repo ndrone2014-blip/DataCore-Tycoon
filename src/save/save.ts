@@ -179,6 +179,8 @@ export function validate(raw: any): LoadResult {
     if (!isNum(c.cash)) c.cash = 1_000_000;
   }
   ensureExpansion(s);
+  // cities added in later versions: older companies already hold every free market, so they get these too
+  if (s.career.mode === 'legacy') for (const c of CITIES) if (c.town && c.license === 0 && !s.unlockedCities.includes(c.id)) s.unlockedCities.push(c.id);
   s.fiber.routes = s.fiber.routes.filter((r) => r && fiberLink(r.link) && isNum(r.doneAt) && isNum(r.tier));
   for (const fac of Object.values(s.facilities)) if (fac.orders && !Array.isArray(fac.orders)) fac.orders = undefined;
   s.version = SAVE_VERSION;

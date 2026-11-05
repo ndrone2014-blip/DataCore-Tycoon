@@ -12,6 +12,8 @@ import { esc, money, duration } from './core/format';
 import { unlockAudio, playSfx } from './audio/sound';
 import { startTitleScene, stopTitleScene } from './ui/titleScene';
 import { applyMode, deviceMode, recommendedMode, rememberedMode, type DeviceMode } from './core/device';
+import { starterParcel } from './systems/career';
+import { applySeasonClass, rememberedSeason } from './core/season';
 
 declare const __GAME_VERSION__: string;
 export const GAME_VERSION = typeof __GAME_VERSION__ !== 'undefined' ? __GAME_VERSION__ : 'dev';
@@ -21,7 +23,8 @@ const app = new App();
 (window as any).__app = app;
 installDelegation(document);
 
-const wizard = { name: 'Nimbus Compute', logo: COMPANY_LOGOS[0], color: COMPANY_COLORS[0], city: 'nova', difficulty: 'standard' };
+const wizard = { name: 'Nimbus Compute', logo: COMPANY_LOGOS[0], color: COMPANY_COLORS[0], city: 'carmi', difficulty: 'standard' };
+const SEASON_LINE = `<p class="season-line">🍂 Happy Thanksgiving from Drone Hive Studios 🦃</p>`;
 
 function bootRoot(): HTMLElement {
   return document.getElementById('boot')!;
@@ -59,7 +62,8 @@ function titleScreen(hasSave: { name: string; level: number; savedAt: number } |
     <div class="boot-card">
       <div class="boot-logo">◢◤</div>
       <h1>AI DATA CENTER <span>EMPIRE</span></h1>
-      <p class="tag-line">Buy land anywhere on Earth. Demolish. Build hyperscale AI campuses. Outgrow your rivals.</p>
+      <p class="tag-line">Start in a rented garage. Buy your first lot. Build a data center. Grow it into a global AI empire.</p>
+      ${SEASON_LINE}
       ${error ? `<div class="callout bad small">${esc(error)} — a new game is required.</div>` : ''}
       ${repaired.length ? `<div class="callout warn small">Your save was repaired (${esc(repaired.slice(0, 4).join(', '))}${repaired.length > 4 ? '…' : ''}).</div>` : ''}
       <div class="boot-actions">
@@ -74,7 +78,10 @@ function titleScreen(hasSave: { name: string; level: number; savedAt: number } |
 }
 
 function wizardScreen() {
-  const starters = CITIES.filter((c) => c.unlockLevel <= 1 && c.license === 0);
+  const starters = CITIES.filter((c) => c.unlockLevel <= 1 && c.license === 0).sort((a, b) => Number(!!b.town) - Number(!!a.town));
+  const diff = ECONOMY.difficulties[wizard.difficulty];
+  const home = CITIES.find((c) => c.id === wizard.city)!;
+  const firstLot = starterParcel(wizard.city);
   bootRoot().innerHTML = `
     <canvas id="title-scene"></canvas>
     <div class="boot-card wide">
@@ -83,10 +90,10 @@ function wizardScreen() {
         <label>Company name<input type="text" id="wz-name" value="${esc(wizard.name)}" maxlength="28" data-change="wzName" data-live></label>
         <div><span class="lbl">Logo</span><div class="logo-pick">${COMPANY_LOGOS.map((l) => `<button class="${wizard.logo === l ? 'on' : ''}" data-act="wzLogo" data-v="${l}">${l}</button>`).join('')}</div></div>
         <div><span class="lbl">Brand color</span><div class="color-pick">${COMPANY_COLORS.map((c) => `<button class="${wizard.color === c ? 'on' : ''}" style="background:${c}" data-act="wzColor" data-v="${c}"></button>`).join('')}</div></div>
-        <div><span class="lbl">Starting city</span><div class="city-pick">${starters.map((c) => `<button class="${wizard.city === c.id ? 'on' : ''}" data-act="wzCity" data-v="${c.id}"><b>${countryById(c.country).flag} ${c.name}</b><small>${esc(c.blurb)}</small><em>Power $${c.powerPrice.toFixed(2)}/kWh · Land ${Math.round(c.landMult * 100)}% · Demand ${Math.round(c.demand / 1000)}k</em></button>`).join('')}</div></div>
-        <div><span class="lbl">Difficulty</span><div class="diff-pick">${Object.entries(ECONOMY.difficulties).map(([k, v]) => `<button class="${wizard.difficulty === k ? 'on' : ''}" data-act="wzDiff" data-v="${k}"><b>${v.label}</b><small>${money(v.cash)} starting cash</small></button>`).join('')}</div></div>
+        <div><span class="lbl">Home town <small class="muted">· the only market open to you at first</small></span><div class="city-pick">${starters.map((c) => `<button class="${wizard.city === c.id ? 'on' : ''}" data-act="wzCity" data-v="${c.id}"><b>${countryById(c.country).flag} ${c.name}${c.town ? ', Illinois' : ''}</b>${c.town ? ' <span class="tag ok sm">Easiest start</span>' : ''}<small>${esc(c.blurb)}</small><em>Power $${c.powerPrice.toFixed(2)}/kWh · Land ${Math.round(c.landMult * 100)}% · Demand ${c.demand < 1000 ? c.demand : `${Math.round(c.demand / 1000)}k`}</em></button>`).join('')}</div></div>
+        <div><span class="lbl">Difficulty</span><div class="diff-pick">${Object.entries(ECONOMY.difficulties).map(([k, v]) => `<button class="${wizard.difficulty === k ? 'on' : ''}" data-act="wzDiff" data-v="${k}"><b>${v.label}</b><small>${money(v.careerCash)} starting cash</small></button>`).join('')}</div></div>
       </div>
-      <div class="preview" style="--c:${wizard.color}"><span class="tb-logo">${esc(wizard.logo)}</span><b>${esc(wizard.name || 'Your Company')}</b><small>Headquartered in ${CITIES.find((c) => c.id === wizard.city)!.name}</small></div>
+      <div class="preview" style="--c:${wizard.color}"><span class="tb-logo">${esc(wizard.logo)}</span><b>${esc(wizard.name || 'Your Company')}</b><small>A rented garage in ${home.name}. First goal: buy ${esc(firstLot.name)} for about ${money(firstLot.basePrice * home.landMult * diff.priceMult)}.</small></div>
       <div class="row between mt"><button class="btn ghost" data-act="bootBack">Back</button><button class="btn primary xl" data-act="bootStart">Launch company →</button></div>
     </div>`;
   startTitleScene(document.getElementById('title-scene') as HTMLCanvasElement);
@@ -158,6 +165,7 @@ registerChanges({
 });
 
 async function boot() {
+  applySeasonClass(rememberedSeason());
   const r = await loadGame();
   cachedMeta = r.state ? { name: r.state.company.name, level: r.state.level, savedAt: r.state.lastRealTime } : null;
   bootRepaired = r.state ? r.repaired : [];

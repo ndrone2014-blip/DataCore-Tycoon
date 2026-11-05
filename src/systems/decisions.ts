@@ -10,6 +10,7 @@ import { receive, spend, addXp, log, canAfford, pushNews } from './ledger';
 import { toast, sfx, emit } from '../core/bus';
 import { money } from '../core/format';
 import { researchById } from '../config/research';
+import { isCareer, rewardCash } from './careerCore';
 
 export interface DecisionChoice {
   label: string;
@@ -179,8 +180,10 @@ export function tickDecisions(s: GameState, d: Derived) {
   if (s.nextDecisionAt === undefined) s.nextDecisionAt = s.gameHours + 30;
   if (s.decision || s.gameHours < s.nextDecisionAt) return;
   s.nextDecisionAt = s.gameHours + randRange(ECONOMY.decisionIntervalHours[0], ECONOMY.decisionIntervalHours[1]);
-  if (s.gameHours < 20) return;
+  if (s.gameHours < 20 || (isCareer(s) && s.career.stage < 1)) return;
   const options = DECISIONS.map((def) => ({ def, data: def.setup(s, d) })).filter((o) => o.data);
+  // career companies get offers sized for the slower economy
+  if (isCareer(s)) for (const o of options) for (const k of ['cash', 'cost']) if (o.data![k]) o.data![k] = Math.max(500, rewardCash(s, o.data![k]));
   if (!options.length) return;
   const o = pick(options);
   const pd: PendingDecision = { id: newId(s, 'op'), defId: o.def.id, expiresAt: s.gameHours + 72, data: o.data! };

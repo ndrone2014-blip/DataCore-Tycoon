@@ -336,7 +336,14 @@ export function buildSky(o: Out, b: SkyBuilding) {
     case 'apartment': apartment(o, r, x0, y0, x1, y1, b.height, s); break;
     case 'brick': brickRow(o, r, x0, y0, x1, y1, b.height, s); break;
     case 'low': if (r() < 0.5) brickRow(o, r, x0, y0, x1, y1, Math.max(6, b.height), s); else apartment(o, r, x0, y0, x1, y1, Math.max(6, b.height), s); break;
-    case 'house': house(o, r, x0, y0, x1, y1, s); break;
+    case 'house': house(o, r, x0, y0, x1, y1, s); if (b.yard && o.detail > 0) tree(o, r, x1 + 3 + r() * 3, y0 + r() * (y1 - y0), 1.05); break;
+    case 'civic': civicBuilding(o, r, x0, y0, x1, y1, s); break;
+    case 'church': church(o, x0, y0, x1, y1, s); break;
+    case 'school': school(o, r, x0, y0, x1, y1, b.height, s); break;
+    case 'silo': silo(o, x0, y0, x1, y1, b.height, s); break;
+    case 'barn': barn(o, x0, y0, x1, y1, s); break;
+    case 'watertower': waterTower(o, x0, y0, x1, y1, b.height, s); return;
+    case 'pumpjack': pumpjack(o, x0, y0, x1, y1, s); return;
     case 'warehouse': {
       const wall = pick(r, METAL);
       o.m.box(x0, 0, y0, x1, b.height, y1, wall, { st: S.metal, seed: s, bay: 10 }, { col: ROOF, m: { st: S.roof, seed: s } });
@@ -345,6 +352,68 @@ export function buildSky(o: Out, b: SkyBuilding) {
     }
   }
   contact(o, x0, y0, x1, y1, b.height);
+}
+
+// ---------- small-town landmarks ----------
+function civicBuilding(o: Out, r: () => number, x0: number, z0: number, x1: number, z1: number, seed: number) {
+  const m = o.m, brick = hex('#94553f'), stone = hex('#c9c3b4'), H = 11;
+  const mat: Mat = { st: S.brick, seed, flr: 4.2, bay: 3.4 };
+  m.box(x0, 0, z0, x1, H, z1, brick, mat, { col: hex('#3f4347'), m: { st: S.roof, seed } });
+  const cx = (x0 + x1) / 2;
+  // entrance block with pale stone trim, steps and a flag
+  m.box(cx - 7, 0, z1, cx + 7, H + 1.5, z1 + 2.2, stone, { st: S.office, seed, flr: 4.2, bay: 3.5 }, { col: stone, m: { st: S.plain, seed } });
+  for (let i = 0; i < 3; i++) m.box(cx - 8 - i, i * -0.0, z1 + 2.2 + i * 0.8, cx + 8 + i, 1.2 - i * 0.4, z1 + 3 + i * 0.8, stone, { st: S.plain, seed }, undefined, 0.8);
+  m.box(x0 - 0.15, H - 0.7, z0 - 0.15, x1 + 0.15, H, z1 + 0.15, stone, { st: S.plain, seed });
+  m.cyl(cx + 13, 0, z1 + 8, 0.09, 12, [0.75, 0.76, 0.78], { st: S.plain, seed }, 6, false);
+  m.box(cx + 13.1, 10.2, z1 + 7.97, cx + 15.8, 11.8, z1 + 8.03, hex('#a8322b'), { st: S.plain, seed }, null, 1);
+  if (o.detail > 0) { tree(o, r, x0 - 7, z0 + 4, 1.2); tree(o, r, x1 + 7, z0 + 4, 1.2); tree(o, r, x0 - 7, z1 + 4, 1.1); tree(o, r, x1 + 7, z1 + 4, 1.1); }
+}
+function church(o: Out, x0: number, z0: number, x1: number, z1: number, seed: number) {
+  const m = o.m, wall = hex('#ddd8cc'), roof = hex('#494b4e'), mat: Mat = { st: S.siding, seed, flr: 5, bay: 4 };
+  m.box(x0, 0, z0, x1, 6.5, z1, wall, mat, null);
+  m.gable(x0, 6.5, z0, x1, z1, 4.5, roof, wall, seed, mat);
+  const cx = (x0 + x1) / 2, t0 = z1 - 5, w = 2.6;
+  m.box(cx - w, 0, t0, cx + w, 14, z1 + 1.5, wall, mat, { col: roof, m: { st: S.shingle, seed } });
+  m.gable(cx - w, 14, t0, cx + w, z1 + 1.5, 6, roof, wall, seed, mat);
+  m.box(cx - 0.12, 19.5, t0 + 3, cx + 0.12, 22, t0 + 3.3, [0.82, 0.82, 0.8], { st: S.plain, seed }, null, 1);
+}
+function school(o: Out, r: () => number, x0: number, z0: number, x1: number, z1: number, H: number, seed: number) {
+  const m = o.m, brick = hex('#a0604a');
+  m.box(x0, 0, z0, x1, H, z1, brick, { st: S.brick, seed, flr: 3.9, bay: 3 }, { col: ROOF, m: { st: S.roof, seed } });
+  const cx = (x0 + x1) / 2;
+  m.box(cx - 5, 0, z1, cx + 5, 5, z1 + 1, hex('#7fa3b5'), { st: S.glass, seed, flr: 5, bay: 2.5 });
+  rooftop(o, r, x0, z0, x1, z1, H, seed, { plant: 3, parapet: 0.7 });
+  // ball field out back
+  m.flat(x0, z1 + 6, x1, z1 + 38, 0.07, [0.28, 0.42, 0.18], { st: S.grass, seed });
+  m.flat(x0 + 26, z1 + 12, x1 - 26, z1 + 32, 0.09, hex('#8c6a45'), { st: S.dirt, seed });
+}
+function silo(o: Out, x0: number, z0: number, x1: number, z1: number, H: number, seed: number) {
+  const c = hex('#b9bcbf'), rad = Math.min(x1 - x0, z1 - z0) / 2, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  o.m.cyl(cx, 0, cz, rad, H, c, { st: S.metal, seed, bay: 2 }, 14);
+  o.m.cyl(cx, H, cz, rad * 0.55, rad * 0.45, scalec(c, 0.82), { st: S.metal, seed, bay: 0 }, 14);
+}
+function barn(o: Out, x0: number, z0: number, x1: number, z1: number, seed: number) {
+  const red = hex('#8c3026'), mat: Mat = { st: S.siding, seed, flr: 2.8, bay: 2 };
+  o.m.box(x0, 0, z0, x1, 5.2, z1, red, mat, null);
+  o.m.gable(x0, 5.2, z0, x1, z1, 3.6, hex('#5a5d60'), red, seed, mat);
+}
+function waterTower(o: Out, x0: number, z0: number, x1: number, z1: number, H: number, seed: number) {
+  const c = hex('#c9ced2'), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, rad = (x1 - x0) / 2;
+  for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) o.m.cyl(cx + a * rad * 0.7, 0, cz + b * rad * 0.7, 0.32, H - 7, [0.55, 0.57, 0.6], { st: S.plain, seed }, 6, false);
+  o.m.cyl(cx, 0, cz, 0.6, H - 7, [0.55, 0.57, 0.6], { st: S.plain, seed }, 6, false);
+  o.m.cyl(cx, H - 7, cz, rad, 6, c, { st: S.paint, seed }, 16);
+  o.m.cyl(cx, H - 1, cz, rad * 0.5, 1.4, scalec(c, 0.92), { st: S.paint, seed }, 16);
+  o.glows.push({ x: cx, y: H + 0.8, z: cz, c: [1, 0.12, 0.08], a: 0.7, size: 22 });
+}
+function pumpjack(o: Out, x0: number, z0: number, x1: number, z1: number, seed: number) {
+  const m = o.m, c = hex('#3f4348'), red = hex('#8a3a2c'), cz = (z0 + z1) / 2, pm: Mat = { st: S.plain, seed };
+  m.flat(x0 - 2, z0 - 3, x1 + 2, z1 + 3, 0.05, [0.42, 0.38, 0.3], { st: S.gravel, seed });
+  m.box(x0, 0, z0 + 0.5, x1, 0.5, z1 - 0.5, c, pm);
+  m.box(x0 + 3.4, 0.5, cz - 0.9, x0 + 3.8, 4.2, cz - 0.6, c, pm, undefined, 1);
+  m.box(x0 + 3.4, 0.5, cz + 0.6, x0 + 3.8, 4.2, cz + 0.9, c, pm, undefined, 1);
+  m.box(x0 - 0.2, 4, cz - 0.28, x1 - 1, 4.5, cz + 0.28, red, pm, undefined, 1);
+  m.box(x0 - 1, 3, cz - 0.4, x0 + 0.1, 5, cz + 0.4, c, pm, undefined, 1);
+  m.box(x1 - 2, 0.5, cz - 0.5, x1 - 0.8, 3.4, cz + 0.5, red, pm, undefined, 1);
 }
 
 export function buildPark(o: Out, rect: Rect, seed: number) {
@@ -397,6 +466,11 @@ export function buildParcel(o: Out, p: ParcelDef, st: ParcelRender, s: GameState
       return Math.max(H, 40) * 1.15;
     }
     case 'office': {
+      if (p.brick) {
+        brickRow(o, r, x0 + 1, z0 + 1, x1 - 1, z1 - 1, Math.max(7, H), seed);
+        contact(o, x0 + 1, z0 + 1, x1 - 1, z1 - 1, H);
+        return Math.max(7, H) * 1.3;
+      }
       if (p.area > 2200) {
         // office park: two or three linked blocks around a plaza
         const n = 2 + (p.area > 4500 ? 1 : 0);
@@ -418,7 +492,7 @@ export function buildParcel(o: Out, p: ParcelDef, st: ParcelRender, s: GameState
     }
     case 'retail':
     case 'restaurant':
-      if (w < 16 || d < 16) {
+      if (w < 16 || d < 16 || p.brick) {
         const q = [x0 + 1, z0 + 1, x1 - 1, z1 - 1];
         brickRow(o, r, q[0], q[1], q[2], q[3], Math.max(5, H), seed);
         contact(o, q[0], q[1], q[2], q[3], H);
@@ -488,6 +562,22 @@ function constructionSite(o: Out, r: () => number, p: ParcelDef, st: ParcelRende
   m.box(hookX - 0.03, y + 3, tz - 0.03, hookX + 0.03, th, tz + 0.03, DARKM, ym, null, 1);
   m.box(hookX - 1.4, y + 2, tz - 1, hookX + 1.4, y + 3, tz + 1, [0.4, 0.42, 0.44], ym);
   o.glows.push({ x: tx + bw * 0.9 + 6, y: th + 1.2, z: tz, c: [1, 0.4, 0.1], a: 1, size: 50 });
+  // each trade leaves its mark, so the site visibly moves through its stages
+  if (o.detail > 0) {
+    const yard = z1 - 7;
+    if (pr > 0.04 && pr < 0.3) for (let i = 0; i < 3; i++) m.box(x1 - 7 - i * 3.4, 0, z0 + 2, x1 - 4.6 - i * 3.4, 0.9 + (i % 2) * 0.7, z0 + 5.4, hex('#8c7a5c'), { st: S.plain, seed }); // pallets of materials
+    if (pr > 0.42 && pr < 0.97) {
+      m.box(bx1 - 5, 0, yard, bx1 - 1.6, 2.6, yard + 2.6, [0.33, 0.42, 0.35], { st: S.metal, seed, bay: 0 }); // transformer
+      for (let i = 0; i < 2; i++) m.cyl(bx1 - 8.5 - i * 2.4, 0, yard + 1.2, 0.95, 1.5, hex('#7a5a36'), { st: S.plain, seed }, 8); // cable drums
+    }
+    if (pr > 0.56 && pr < 0.97) for (let i = 0; i < 3; i++) m.box(bx0 + 1 + i * 4.4, 0, yard, bx0 + 4.8 + i * 4.4, 2.2, yard + 2.6, [0.78, 0.79, 0.8], { st: S.metal, seed: seed + i, bay: 0 }); // chillers waiting to go up
+    if (pr > 0.68 && pr < 0.98 && y > 0) {
+      // scaffolding around the cladding
+      const pole: RGB = [0.52, 0.53, 0.55], pm: Mat = { st: S.plain, seed };
+      for (let lv = 2; lv <= y + 1; lv += 2.2) { m.box(bx0 - 1.2, lv, bz1 + 1, bx1 + 1.2, lv + 0.1, bz1 + 1.5, pole, pm, undefined, 1); m.box(bx0 - 1.2, lv, bz0 - 1.5, bx1 + 1.2, lv + 0.1, bz0 - 1, pole, pm, undefined, 1); }
+      for (let q = bx0 - 1; q <= bx1 + 1; q += 5) { m.box(q, 0, bz1 + 1.2, q + 0.1, y + 1.5, bz1 + 1.3, pole, pm, null, 1); m.box(q, 0, bz0 - 1.3, q + 0.1, y + 1.5, bz0 - 1.2, pole, pm, null, 1); }
+    }
+  }
   // site trailers and a truck
   m.box(x0 + 2, 0, z1 - 5, x0 + 9, 2.7, z1 - 2.4, hex('#e4e0d4'), { st: S.siding, seed, flr: 2.7, bay: 2.5 }, { col: hex('#555'), m: { st: S.plain, seed } });
   truck(o, r, x1 - 8, z1 - 5, 0);
@@ -562,6 +652,14 @@ function dataCenter(o: Out, r: () => number, p: ParcelDef, st: ParcelRender, s: 
     // roller doors at the loading bay
     m.box(bx1 - 12, 0, bz1 - 0.05, bx1 - 2, 4.5, bz1 + 0.1, hex('#3b4048'), { st: S.metal, seed, bay: 5 }, null);
     rooftop(o, r, bx0, bz0, bx1, bz1, H, seed, { plant: 0, parapet: 1.1, col: scalec(wallCol, 0.85) });
+    if (o.detail > 0) {
+      // structural piers and air intakes break up long walls; cable trays run across the roof
+      const pier = scalec(wallCol, 0.8), pm: Mat = { st: S.plain, seed };
+      const span = Math.max(6, bw / Math.min(10, Math.ceil(bw / 7)));
+      for (let q = bx0; q <= bx1 + 0.01; q += span) { m.box(q - 0.22, 0, bz1, q + 0.22, H - 1.6, bz1 + 0.28, pier, pm, null, 1); m.box(q - 0.22, 0, bz0 - 0.28, q + 0.22, H - 1.6, bz0, pier, pm, null, 1); }
+      for (let q = bz0 + 3; q < bz1 - 4; q += Math.max(7, bd / 4)) m.box(bx0 - 0.3, H * 0.55, q, bx0, H * 0.55 + 2.2, q + 3.6, [0.24, 0.26, 0.29], { st: S.metal, seed, bay: 0 }, null, 1);
+      if (o.detail > 1) { m.box(bx0 + 1.6, H + 0.15, (bz0 + bz1) / 2 - 0.3, bx1 - 1.6, H + 0.4, (bz0 + bz1) / 2 + 0.3, [0.55, 0.56, 0.58], { st: S.metal, seed, bay: 0 }, undefined, 1); }
+    }
     // chillers: more cooling gear means a busier roof
     const eq = f?.equipment ?? {};
     const units = Math.min(36, 4 + (eq.cooling_air ?? 0) * 2 + (eq.cooling_adv ?? 0) * 3 + (eq.liquid ?? 0) * 5 + (bp ? Math.floor(bp.slots / 60) : 0));
@@ -593,6 +691,14 @@ function dataCenter(o: Out, r: () => number, p: ParcelDef, st: ParcelRender, s: 
     }
     if (yardDepth > 12) parkingRows(o, r, bx0 + bw * 0.45, yardZ + 4, x1 - 2, z1 - 2, seed, 0.4);
   }
+  // utility service: poles and a pad transformer appear once the electric company has been out
+  if (f && (!f.hookups || f.hookups.power === 0) && o.detail > 0) {
+    const pole = [0.3, 0.22, 0.15] as RGB;
+    m.cyl(x0 + 2, 0, z1 - 1.6, 0.16, 8.4, pole, { st: S.plain, seed }, 6, false);
+    m.box(x0 + 0.7, 7.7, z1 - 1.68, x0 + 3.3, 7.86, z1 - 1.52, pole, { st: S.plain, seed }, undefined, 1);
+    m.box(x0 + 3.2, 0, z1 - 4.2, x0 + 5.6, 1.7, z1 - 2.2, [0.28, 0.37, 0.3], { st: S.metal, seed, bay: 0 });
+  }
+  if (f && (!f.hookups || f.hookups.net === 0) && o.detail > 0) m.box(x1 - 3.4, 0, z0 + 1.2, x1 - 2.4, 1.2, z0 + 2, hex('#d07a1e'), { st: S.paint, seed }, undefined, 1);
   fence(o, x0 + 0.5, z0 + 0.5, x1 - 0.5, z1 - 0.5, seed, 2.6, [0.34, 0.36, 0.38]);
   if (eq.security || w > 30) m.box(x1 - 6, 0, z1 - 4, x1 - 2.5, 2.8, z1 - 1, hex('#c8c9c5'), { st: S.shop, seed, flr: 2.8, bay: 2 }, { col: DARKM, m: { st: S.plain, seed } });
   return H + 3;
@@ -667,6 +773,32 @@ export function truckModel(m: Mesh) {
   m.box(-6, 0.7, -1.15, 6, 1.1, 1.15, t, { st: S.plain, seed: 0 }, undefined, 1);
   for (const x of [-4.8, -3.4, 2, 4.8]) { m.box(x - 0.5, 0, -1.3, x + 0.5, 1, -1.05, t, { st: S.plain, seed: 0 }, undefined, 1); m.box(x - 0.5, 0, 1.05, x + 0.5, 1, 1.3, t, { st: S.plain, seed: 0 }, undefined, 1); }
   return m;
+}
+
+export function pumpkinModel(m: Mesh) {
+  m.reset();
+  const skin: Mat = { st: S.paint, seed: 0.3 };
+  m.blob(0, 0.3, 0, 0.42, [1, 1, 1], skin, 0.72);
+  m.box(-0.04, 0.52, -0.04, 0.04, 0.68, 0.04, [0.22, 0.3, 0.12], { st: S.plain, seed: 0.1 }, undefined, 1);
+  return m;
+}
+
+/** Hay bale with a shock of corn stalks tied behind it. */
+export function hayModel(m: Mesh) {
+  m.reset();
+  const straw: Mat = { st: S.plain, seed: 0.5 };
+  m.box(-0.75, 0, -0.4, 0.75, 0.62, 0.4, [1, 1, 1], straw, { col: [1.1, 1.05, 0.9], m: straw }, 0.75);
+  m.cyl(0.1, 0, -0.7, 0.3, 1.9, [0.8, 0.72, 0.5], { st: S.foliage, seed: 0.6 }, 6, false);
+  return m;
+}
+
+/** Autumn colours for a green tree, chosen by position so a tree keeps its colour. */
+export function autumnTint(x: number, z: number): RGB {
+  const h = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+  if (h < 0.3) return [0.52, 0.27, 0.08];
+  if (h < 0.5) return [0.47, 0.17, 0.07];
+  if (h < 0.76) return [0.56, 0.42, 0.1];
+  return [0.34, 0.38, 0.13];
 }
 
 export function lampModel(m: Mesh) {
