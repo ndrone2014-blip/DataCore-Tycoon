@@ -1,4 +1,5 @@
 // Global expansion: every new system has to change the game, save correctly and survive old saves.
+import { SAVE_VERSION } from '../src/core/state';
 import { newGame, advance, advanceFrozen, catchUp } from '../src/systems/sim';
 import { deriveAll } from '../src/systems/derive';
 import { parse, serialize } from '../src/save/save';
@@ -27,7 +28,7 @@ const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps * Math
 
 /** A running company with one data center in Northern Virginia. */
 function company(cash = 5e8, level = 30): { g: GameState; fid: string } {
-  const g = newGame({ name: 'Co', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const g = newGame({ name: 'Co', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
   g.cash = cash; g.level = level;
   const fid = 'dcT', pid = g.company.startParcel!;
   g.parcels[pid] = { owner: 'player', status: 'facility', facilityId: fid };
@@ -39,12 +40,12 @@ function company(cash = 5e8, level = 30): { g: GameState; fid: string } {
 {
   const fs = (globalThis as any).process.getBuiltinModule?.('fs');
   const path = 'tests/fixtures/save-v2.0-late.json'; // a real save written by version 2.0
-  const g = newGame({ name: 'Old', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const g = newGame({ name: 'Old', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
   const raw = JSON.parse(serialize(g));
   raw.v = 3; raw.state.version = 3;
   for (const k of ['news', 'newsState', 'policies', 'policyAt', 'citySpec', 'fiber', 'supply', 'rep', 'integrations', 'dealCooldown']) delete raw.state[k];
   const r = parse(JSON.stringify(raw));
-  ok(r.state && r.state.version === 4 && Array.isArray(r.state.fiber.routes) && r.state.supply.chosen.gpu === 'std_gpu', 'a version 3 save gains the new systems on load');
+  ok(r.state && r.state.version === SAVE_VERSION && Array.isArray(r.state.fiber.routes) && r.state.supply.chosen.gpu === 'std_gpu', 'a version 3 save gains the new systems on load');
   ok(!!r.state && (advance(r.state, 50), true), 'a migrated save keeps simulating');
   if (fs?.existsSync(path)) {
     const old = parse(fs.readFileSync(path, 'utf8'));
@@ -289,7 +290,7 @@ function company(cash = 5e8, level = 30): { g: GameState; fid: string } {
 
 // ---- rivals use the new systems on their own ----
 {
-  const g = newGame({ name: 'W', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const g = newGame({ name: 'W', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
   const n = g.competitors.length;
   for (let i = 0; i < 6000; i++) advance(g, 1);
   ok(g.fiber.routes.some((r) => r.owner !== 'player'), 'rivals build fiber without being told to');

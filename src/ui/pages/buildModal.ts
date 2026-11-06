@@ -7,6 +7,7 @@ import { quoteBuild, startBuild, defaultCustom } from '../../systems/constructio
 import { openModal, closeModal } from '../components';
 import { registerActions, registerChanges } from '../dom';
 import { money, area, power, esc, duration } from '../../core/format';
+import { hasFeature } from '../../systems/career';
 
 interface BuildUI {
   parcelId: string;
@@ -22,7 +23,8 @@ let installed = false;
 export function openBuildModal(app: App, parcelId: string) {
   const p = getParcel(parcelId)!;
   const feasible = BLUEPRINTS.filter((b) => (app.s.dev?.unlockAll || b.level <= app.s.level) && b.minLot <= p.area);
-  const bp = feasible[feasible.length - 1] ?? BLUEPRINTS[0];
+  // open on the biggest building you can actually pay for, not the biggest you can't
+  const bp = [...feasible].reverse().find((b) => quoteBuild(app.s, parcelId, b.id).ok) ?? feasible[0] ?? BLUEPRINTS[0];
   ui = { parcelId, mode: 'premade', bp: bp.id, custom: defaultCustom(bp, p), name: '' };
   if (!installed) install(app);
   openModal(() => render(app), { wide: true, onClose: () => (ui = null) });
@@ -62,7 +64,7 @@ function render(app: App): string {
   return `
     <h2>🏗️ Build on ${esc(p.name)}</h2>
     <p class="muted small">${area(p.area)} lot · zoning ${p.zoning.code} (max ${p.zoning.maxFloors} floors, ${Math.round(p.zoning.maxCoverage * 100)}% coverage)</p>
-    <div class="tabs"><button class="${ui.mode === 'premade' ? 'on' : ''}" data-act="bmMode" data-v="premade">Premade blueprints</button><button class="${ui.mode === 'custom' ? 'on' : ''}" data-act="bmMode" data-v="custom">Custom building</button></div>
+    <div class="tabs"><button class="${ui.mode === 'premade' ? 'on' : ''}" data-act="bmMode" data-v="premade">Premade blueprints</button><button class="${ui.mode === 'custom' ? 'on' : ''}" data-act="bmMode" data-v="custom" ${hasFeature(s, 'g_upgrades') ? '' : 'disabled title="The custom designer unlocks with Building Upgrades"'}>Custom building</button></div>
     <div class="build-grid">
       <div>${left}</div>
       <div class="build-summary">

@@ -32,7 +32,16 @@ const SUFFIX_BY_TYPE: Record<CustomerType, string[]> = {
   government: ['Defense Agency', 'Weather Service', 'Health Department', 'Census Bureau', 'Space Agency'],
   tech: ['Software', 'Cloud', 'Social', 'Search', 'Streaming', 'Games', 'Platforms'],
 };
-export function customerName(type: CustomerType, r: () => number): string {
+// Fictional small-town clients: farming, oilfield services and Main Street.
+const LOCAL_CLIENTS: Partial<Record<CustomerType, string[]>> = {
+  small: ['Little Wabash Grain Co-op', 'Courthouse Square Pharmacy', 'Bottomland Farm Supply', 'Main Cross Insurance', 'Southern Illinois Oilfield Services', 'Wabash Valley Seed', 'Oak Street Auto Parts', 'County Line Veterinary'],
+  startup: ['Prairie Precision Ag', 'Riverbend Robotics', 'Cornbelt Vision Labs', 'Tillage AI'],
+  university: ['Tri-County Community College', 'Southern Prairie College'],
+  corp: ['Mid-Rivers Energy Holdings', 'Heartland Farm Credit'],
+};
+export function customerName(type: CustomerType, r: () => number, local = false): string {
+  const near = local ? LOCAL_CLIENTS[type] : undefined;
+  if (near) return near[Math.floor(r() * near.length)];
   const p = PREFIX[Math.floor(r() * PREFIX.length)];
   const list = SUFFIX_BY_TYPE[type];
   return `${p} ${list[Math.floor(r() * list.length)]}`;

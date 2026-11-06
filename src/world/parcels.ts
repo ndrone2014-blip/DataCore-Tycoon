@@ -62,6 +62,10 @@ export interface ParcelDef {
   restrictions: string[];
   isSite?: boolean; // consolidated zone site
   members?: string[];
+  /** The property on the market when a new company is founded here. */
+  starter?: boolean;
+  /** Old brick storefront instead of the type's usual building. */
+  brick?: boolean;
 }
 
 export interface ZoneDef {
@@ -147,6 +151,7 @@ export function allParcels(): ParcelDef[] {
 }
 
 function generate(city: CityDef): CityLayout {
+  if (city.town) return generateTown(city);
   let r = mulberry32(hashString('district:' + city.id));
   const [clng, clat] = city.district;
   const mLat = 1 / 111320;
@@ -399,15 +404,169 @@ function generate(city: CityDef): CityLayout {
   return { city, plate, streets, parcels, zones, sites, bounds: [sw[0], sw[1], ne[0], ne[1]] };
 }
 
+// ---------- small town street plan ----------
+// Carmi, Illinois. The named streets and their directions come from real local addresses (Main,
+// Oak and Robinson run east-west; Main Cross, Church and Walnut run north-south; Oak carries Highway
+// 14) and the Little Wabash River runs along the east side. It is a game-scale plan of the town, not
+// a survey: spacing and exact positions are approximate, and every business name is fictional.
+export const TOWN = {
+  /** Blocks in the buildable core. */
+  BX: 8, BY: 7, BW: 92, BH: 84, ST: 14,
+  /** Decorative residential blocks around the core. */
+  ringW: 4, ringE: 2, ringS: 3, ringN: 3,
+  /** Street rows and columns (block-grid indexes). */
+  mainRow: 3, oakRow: 1, mainCrossCol: 4, routeOneCol: -1,
+  EW: ['Sycamore St', 'Oak St', 'Plum St', 'Main St', 'Robinson St', 'Cherry St', 'Elm St', 'Webb St'],
+  NS: ['West St', 'First St', 'Third St', 'Fourth St', 'Main Cross', 'Church St', 'Walnut St', 'Stewart St', 'Water St'],
+};
+/** The Little Wabash, east of town. The ground shader draws the same curve. */
+export function townRiverX(z: number, base: number): number { return base + 70 * Math.sin(z * 0.0032) + 35 * Math.sin(z * 0.0091 + 1.7); }
+export function townPlan(f: { totalW: number; totalH: number; BW: number; BH: number; ST: number }) {
+  const px = f.BW + f.ST, py = f.BH + f.ST;
+  return {
+    px, py,
+    x0: -TOWN.ringW * px, z0: -TOWN.ringS * py, x1: f.totalW + TOWN.ringE * px, z1: f.totalH + TOWN.ringN * py,
+    routeX: TOWN.routeOneCol * px + f.ST / 2, mainZ: TOWN.mainRow * py + f.ST / 2, oakZ: TOWN.oakRow * py + f.ST / 2,
+    riverBase: f.totalW + TOWN.ringE * px + 150,
+  };
+}
+type TownCell = { kind: 'downtown' | 'commercial' | 'mixed' | 'industrial' | 'courthouse' | 'park' | 'school' | 'church' };
+function townCell(i: number, j: number): TownCell['kind'] {
+  if (i === TOWN.mainCrossCol && j === TOWN.mainRow) return 'courthouse';
+  if (i === 2 && j === 5) return 'school';
+  if (i === 6 && j === 5) return 'park';
+  if (i === 5 && j === 4) return 'church';
+  if (j === TOWN.mainRow || j === TOWN.mainRow - 1) { if (i >= 3 && i <= 5) return 'downtown'; }
+  if (j === TOWN.oakRow && i <= 3) return 'commercial';
+  if (j === 0 && i <= 2) return 'industrial';
+  if (i >= 6 && j <= 1) return 'industrial';
+  return 'mixed';
+}
+export const townCellKind = townCell;
+
+function generateTown(city: CityDef): CityLayout {
+  const r = mulberry32(hashString('town:' + city.id));
+  const f = districtFrame(city.id);
+  const { BX, BY, BW, BH, ST, totalW, totalH, toLL } = f;
+  const rectPoly = (x0: number, y0: number, x1: number, y1: number): [number, number][] => [toLL(x0, y0), toLL(x1, y0), toLL(x1, y1), toLL(x0, y1), toLL(x0, y0)];
+  const parcels: ParcelDef[] = [];
+  const zones: ZoneDef[] = [];
+  const sites: ParcelDef[] = [];
+  let lot = 0;
+  const FLR = { warehouse: 7, industrial: 8, shopping_center: 7, office: 3.8 } as Record<string, number>;
+  const add = (blockId: string, type: PropertyType, x0: number, y0: number, x1: number, y1: number, name: string, addr: string, extra: Partial<ParcelDef> = {}) => {
+    lot++;
+    const info = PROPERTY_TYPE_INFO[type];
+    const area = Math.round((x1 - x0) * (y1 - y0));
+    const floors = type === 'office' ? 2 : info.floors[1] === 0 ? 0 : Math.max(info.floors[0], Math.min(2, info.floors[1]));
+    const k = Math.sqrt(info.coverage);
+    const w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const ppm = ECONOMY.landPricePerM2[type] * (0.85 + r() * 0.3);
+    const [lo, hi] = ECONOMY.landPriceClamp[type];
+    // small-town lots sit at the bottom of each type's price range
+    const base = Math.min(hi, Math.max(lo * 0.7, ppm * area * 0.8));
+    const zoning = extra.zoneId ? ZONINGS.PD : type === 'warehouse' || type === 'industrial' || type === 'industrial_land' ? ZONINGS.I1 : type === 'office' || type === 'shopping_center' ? ZONINGS.C2 : ZONINGS.C1;
+    const restrictions = [`Max ${zoning.maxFloors} floors`, `Max ${Math.round(zoning.maxCoverage * 100)}% lot coverage`];
+    if (!zoning.heavy) restrictions.push('No hyperscale-class facilities');
+    if (r() < 0.35) restrictions.push('Rural feeder: limited grid connection');
+    const p: ParcelDef = {
+      id: `${city.id}-${lot}`, cityId: city.id, blockId, type, name, address: addr,
+      poly: rectPoly(x0, y0, x1, y1), footprintPoly: floors > 0 ? rectPoly(cx - (w * k) / 2, cy - (h * k) / 2, cx + (w * k) / 2, cy + (h * k) / 2) : rectPoly(x0 + 3, y0 + 3, x1 - 3, y1 - 3),
+      rect: { x0, y0, x1, y1 }, center: toLL(cx, cy), area,
+      buildingArea: floors > 0 ? Math.round(w * h * info.coverage * floors) : 0, buildingFloors: floors,
+      buildingHeight: floors * (FLR[type] ?? 4), basePrice: Math.round(base / 1000) * 1000,
+      zoning, potential: area > 15000 ? 'Exceptional' : area > 6000 ? 'High' : area > 1800 ? 'Medium' : 'Low',
+      restrictions, ...extra,
+    };
+    parcels.push(p);
+    return p;
+  };
+  const NAMES: Partial<Record<PropertyType, string[]>> = {
+    retail: ['Hardware & Supply', 'Five and Dime', 'Pharmacy', 'Antique Mall', 'Barber Shop', 'Flower Shop', 'Shoe Repair', 'Print Shop', 'Dress Shop', 'Video Store'],
+    restaurant: ['Diner', 'Pizza Parlor', 'Coffee Shop', 'Drive-In', 'Family Restaurant', 'Bakery'],
+    office: ['Insurance Office', 'Law Office', 'Dental Office', 'Savings & Loan', 'Title Company'],
+    warehouse: ['Feed Warehouse', 'Farm Supply Barn', 'Storage Units', 'Tractor Shed', 'Seed Warehouse'],
+    industrial: ['Machine Shop', 'Oilfield Supply Yard', 'Welding Shop', 'Pipe Yard', 'Grain Dryer Shed'],
+    shopping_center: ['Highway 14 Plaza', 'Oak Street Plaza'],
+    empty_lot: ['Vacant Lot', 'Gravel Lot', 'Corner Lot'],
+    industrial_land: ['Rail Spur Land', 'Bottomland Tract'],
+  };
+  const nameOf = (type: PropertyType, street: string) => {
+    const list = NAMES[type] ?? ['Lot'];
+    return `${street.replace(/ (St|Ave|Rd)$/, '')} ${list[Math.floor(r() * list.length)]}`;
+  };
+  const GAP = 2;
+  for (let j = 0; j < BY; j++) for (let i = 0; i < BX; i++) {
+    const kind = townCell(i, j);
+    if (kind === 'courthouse' || kind === 'park' || kind === 'school' || kind === 'church') continue; // landmarks aren't for sale
+    const bx0 = ST + i * (BW + ST) + 3, by0 = ST + j * (BH + ST) + 3, bx1 = bx0 + BW - 6, by1 = by0 + BH - 6;
+    const blockId = `${city.id}-b${i}_${j}`;
+    // lots face the busier street: blocks just south of Main and Oak take those addresses
+    const ew = TOWN.EW[j === TOWN.mainRow - 1 ? TOWN.mainRow : j === TOWN.oakRow - 1 ? TOWN.oakRow : j];
+    const side = i < TOWN.mainCrossCol ? 'W' : 'E';
+    const addrEW = (lotNo: number) => `${(Math.abs(i - TOWN.mainCrossCol) + 1) * 100 + lotNo * 12} ${side} ${ew}`;
+    let cols: number, rows: number, types: PropertyType[];
+    if (kind === 'downtown') { cols = 4; rows = 2; types = ['retail', 'retail', 'restaurant', 'office', 'retail']; }
+    else if (kind === 'commercial') { const big = i === 1; cols = big ? 1 : 3; rows = big ? 1 : 2; types = big ? ['shopping_center'] : ['retail', 'restaurant', 'warehouse', 'office']; }
+    else if (kind === 'industrial') { cols = 2; rows = 1; types = ['warehouse', 'industrial', 'warehouse']; }
+    else { cols = 2; rows = 2; types = ['retail', 'empty_lot', 'office', 'warehouse', 'empty_lot', 'retail']; }
+    const w = (bx1 - bx0) / cols, h = (by1 - by0) / rows;
+    for (let a = 0; a < cols; a++) for (let b = 0; b < rows; b++) {
+      const type = types[Math.floor(r() * types.length)];
+      const lotP = add(blockId, type, bx0 + a * w + GAP / 2, by0 + b * h + GAP / 2, bx0 + (a + 1) * w - GAP / 2, by0 + (b + 1) * h - GAP / 2, nameOf(type, ew), addrEW(a * 2 + b));
+      if (type === 'office' || (kind === 'downtown' && type !== 'warehouse')) lotP.brick = true;
+    }
+  }
+  // the first property: a tired feed store, the cheapest roof in town with room for modular units
+  const start = parcels.filter((p) => p.type === 'warehouse' && p.area >= 1100 && p.area <= 2400).sort((a, b) => a.basePrice - b.basePrice)[0] ?? parcels[0];
+  start.starter = true;
+  start.name = 'Old Feed Store';
+  start.basePrice = 95_000;
+  start.buildingArea = 650;
+  // two big tracts of farmland on the edge of town: where a campus could really go
+  const tract = (zi: number, name: string, x0: number, y0: number, x1: number, y1: number, road: string) => {
+    const zoneId = `${city.id}-z${zi}`;
+    const ids: string[] = [];
+    const cols = 3, rows = 2, w = (x1 - x0) / cols, h = (y1 - y0) / rows;
+    for (let a = 0; a < cols; a++) for (let b = 0; b < rows; b++) {
+      const p = add(`${city.id}-t${zi}`, a === 0 && b === 0 ? 'warehouse' : 'empty_lot', x0 + a * w + 3, y0 + b * h + 3, x0 + (a + 1) * w - 3, y0 + (b + 1) * h - 3, a === 0 && b === 0 ? `${name} Machine Shed` : `${name} Tract`, `${1200 + lot * 8} ${road}`, { zoneId });
+      p.basePrice = Math.round((p.type === 'warehouse' ? 180_000 : Math.max(90_000, p.area * 22)) / 1000) * 1000;
+      ids.push(p.id);
+    }
+    const siteId = `${city.id}-s${zi}`;
+    const area = Math.round((x1 - x0) * (y1 - y0));
+    zones.push({ id: zoneId, cityId: city.id, name: `${name} Development Zone`, parcelIds: ids, siteId, poly: rectPoly(x0 - 2, y0 - 2, x1 + 2, y1 + 2), center: toLL((x0 + x1) / 2, (y0 + y1) / 2), area });
+    sites.push({
+      id: siteId, cityId: city.id, blockId: `${city.id}-t${zi}`, zoneId, type: 'commercial_zone', name: `${name} Campus Site`, address: `${name} (consolidated)`,
+      poly: rectPoly(x0, y0, x1, y1), footprintPoly: rectPoly(x0 + 6, y0 + 6, x1 - 6, y1 - 6), rect: { x0, y0, x1, y1 }, center: toLL((x0 + x1) / 2, (y0 + y1) / 2),
+      area, buildingArea: 0, buildingFloors: 0, buildingHeight: 0, basePrice: 0, zoning: ZONINGS.PD, potential: 'Exceptional', restrictions: ['Max 9 floors', 'Max 80% lot coverage'], isSite: true, members: ids,
+    });
+  };
+  const px = BW + ST, py = BH + ST;
+  const west = -(TOWN.ringW + 1) * px, oakZ = TOWN.oakRow * py + ST / 2, route = TOWN.routeOneCol * px + ST / 2;
+  tract(0, 'Highway 14 West', west - 420, oakZ + 30, west - 30, oakZ + 290, 'W Oak St');
+  tract(1, 'Route 1 South', route + 16, -(TOWN.ringS + 1) * py - 300, route + 416, -(TOWN.ringS + 1) * py - 40, 'Illinois Route 1');
+
+  const streets: CityLayout['streets'] = [];
+  const x0 = -TOWN.ringW * px, x1 = totalW + TOWN.ringE * px, y0 = -TOWN.ringS * py, y1 = totalH + TOWN.ringN * py;
+  for (let i = 0; i <= BX; i++) { const x = i * px + ST / 2; streets.push({ name: TOWN.NS[i], line: [toLL(x, y0), toLL(x, y1)] }); }
+  for (let j = 0; j <= BY; j++) { const y = j * py + ST / 2; streets.push({ name: TOWN.EW[j], line: [toLL(x0, y), toLL(x1, y)] }); }
+  const plate = rectPoly(x0 - 40, y0 - 40, x1 + 40, y1 + 40);
+  const sw = toLL(x0 - 480, y0 - 340), ne = toLL(x1 + 60, y1 + 60);
+  return { city, plate, streets, parcels, zones, sites, bounds: [sw[0], sw[1], ne[0], ne[1]] };
+}
+
 /** Coordinate frame of a city's district (meters ↔ lng/lat), shared with the cityscape generator. */
 export function districtFrame(cityId: string) {
   const city = cityById(cityId);
   const [clng, clat] = city.district;
   const mLat = 1 / 111320;
   const mLng = 1 / (111320 * Math.cos((clat * Math.PI) / 180));
-  const totalW = BX * BW + (BX + 1) * ST;
-  const totalH = BY * BH + (BY + 1) * ST;
+  const town = !!city.town;
+  const [bx, by, bw, bh, st] = town ? [TOWN.BX, TOWN.BY, TOWN.BW, TOWN.BH, TOWN.ST] : [BX, BY, BW, BH, ST];
+  const totalW = bx * bw + (bx + 1) * st;
+  const totalH = by * bh + (by + 1) * st;
   const toLL = (x: number, y: number): [number, number] => [clng + (x - totalW / 2) * mLng, clat + (y - totalH / 2) * mLat];
   const fromLL = (lng: number, lat: number): [number, number] => [(lng - clng) / mLng + totalW / 2, (lat - clat) / mLat + totalH / 2];
-  return { city, toLL, fromLL, totalW, totalH, BX, BY, BW, BH, ST, mLng, mLat };
+  return { city, toLL, fromLL, totalW, totalH, BX: bx, BY: by, BW: bw, BH: bh, ST: st, mLng, mLat, town };
 }

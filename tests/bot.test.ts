@@ -15,7 +15,7 @@ import { CITIES } from '../src/config/world';
 import { money } from '../src/core/format';
 
 const HOURS = Number((globalThis as any).process?.argv?.[2] ?? 3);
-const s = newGame({ name: 'Bot', logo: '⬡', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+const s = newGame({ name: 'Bot', logo: '⬡', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
 const t0 = Date.now();
 let errors = 0;
 const tryDo = (f: () => any) => { try { return f(); } catch (e: any) { if (!/Not enough cash/.test(e.message)) { errors++; console.error('ERR', e.message); } } };

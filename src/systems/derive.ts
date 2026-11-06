@@ -12,6 +12,7 @@ import { cityMods, specMods, type CityMods, type SpecMods } from './regulation';
 import { netStats, type NetStats } from './fiber';
 import { equipCat } from '../config/expansion';
 import { repValuationMult } from './reputation';
+import { garageIncome, hookupsDone, revenueMult, siteOverhead } from './careerCore';
 
 export interface FacStats {
   id: string;
@@ -49,6 +50,8 @@ export interface FacStats {
   cu: number;
   warnings: string[];
   campus: number;
+  /** False until a career site has both power and internet connected. */
+  online: boolean;
 }
 
 export interface Derived {
@@ -62,6 +65,8 @@ export interface Derived {
   totals: {
     transitHr: number;
     networkHr: number;
+    garageRevenueHr: number;
+    garageCostHr: number;
     integrationHr: number;
     rndHr: number;
     networkValue: number;
@@ -150,6 +155,7 @@ export function deriveAll(s: GameState): Derived {
   const modsOf = (id: string) => (modsByCity[id] ??= cityMods(s, id));
   const specOf = (id: string) => (specByCity[id] ??= specMods(s, id, e));
   const opexE = eff(e, 'opex');
+  const siteOver = siteOverhead(s), revK = revenueMult(s);
 
   const itBonusG = deptBonus(s, 'it');
   const financeBonus = deptBonus(s, 'finance');
@@ -173,7 +179,7 @@ export function deriveAll(s: GameState): Derived {
     let coolingCap = (f.baseCooling + r.addCooling) * (1 + eff(e, 'coolingCap') + coolB);
     if (activeEvent(s, 'heatwave', f.cityId) && s.events.some((x) => x.defId === 'heatwave' && x.cityId === f.cityId)) coolingCap *= 0.85;
     const outage = s.events.some((x) => x.defId === 'outage' && x.cityId === f.cityId);
-    const load = r.itLoad;
+    const load = hookupsDone(f) ? r.itLoad : 0;
     let powerFactor = load <= 0 ? 1 : Math.min(1, powerCap / load);
     if (outage) powerFactor = load <= 0 ? 1 : Math.min(powerFactor, r.backup / load);
     const coolingFactor = load <= 0 ? 1 : Math.min(1, coolingCap / load);
@@ -182,7 +188,8 @@ export function deriveAll(s: GameState): Derived {
     const conditionFactor = f.condition >= 70 ? 1 : 0.5 + f.condition / 140;
     const perfBoost = 1 + eff(e, 'perf') + itB * 0.15 + (r.liquid > 0 ? 0.03 : 0) + campus;
     const integrating = !!f.integrateUntil && f.integrateUntil > s.gameHours;
-    const perf = Math.max(0, powerFactor * coolingFactor * networkFactor * conditionFactor * perfBoost * (integrating ? 0.85 : 1));
+    const online = hookupsDone(f);
+    const perf = online ? Math.max(0, powerFactor * coolingFactor * networkFactor * conditionFactor * perfBoost * (integrating ? 0.85 : 1)) : 0;
     const ratio = coolingCap > 0 ? load / coolingCap : load > 0 ? 2 : 0;
     const temperature = ratio <= 1 ? 19 + 16 * ratio : 35 + 22 * (ratio - 1);
     const coolTier = f.custom?.coolingTier ?? 0;
@@ -210,6 +217,8 @@ export function deriveAll(s: GameState): Derived {
       insurance: (f.shellValue + r.equipValue) * ECONOMY.insuranceRate * (1 - financeBonus * 0.5),
       connectivity: (ECONOMY.connectivityBase + ECONOMY.connectivityPerNetwork * r.netUnits) * (1 - eff(e, 'connectivity')) * (1 - (net.city[f.cityId]?.connectCut ?? 0)) * (1 + spec.connectivity),
     };
+    // career sites need a minimum crew once they are live, so a half-empty building loses money
+    if (online && !f.isHQ && siteOver > 0) expenses.staffing = siteOver * (1 - opsB * 0.5);
     for (const k of Object.keys(expenses)) expenses[k] = Math.max(0, expenses[k]);
 
     const warnings: string[] = [];
@@ -218,6 +227,7 @@ export function deriveAll(s: GameState): Derived {
     if (networkFactor < 0.999) warnings.push('Network bottleneck — add switches');
     if (f.condition < 70) warnings.push('Facility needs maintenance');
     if (overLimit) warnings.push(`PUE ${pue.toFixed(2)} is above the local limit of ${mods.pueLimit.toFixed(2)}: paying compliance fees`);
+    if (!online) warnings.push('Not connected: order power and internet hookups');
     if (integrating) warnings.push('Integrating into your company: running at reduced performance');
     if (f.orders?.length) warnings.push('Hardware on order: not running yet');
 
@@ -230,7 +240,7 @@ export function deriveAll(s: GameState): Derived {
       revenue: { contracts: 0, spot: 0 }, expenses,
       revenueHr: 0, expenseHr: 0, profitHr: 0,
       equipmentValue: r.equipValue * ECONOMY.equipmentBookValue,
-      value: 0, utilization: 0, cu: 0, warnings, campus,
+      value: 0, utilization: 0, cu: 0, warnings, campus, online,
     };
     st.cu = delivered.cpu * ECONOMY.cuPerUnit.cpu + delivered.gpu * ECONOMY.cuPerUnit.gpu + delivered.storage * ECONOMY.cuPerUnit.storage;
     playerCU[f.cityId] = (playerCU[f.cityId] ?? 0) + st.cu;
@@ -278,7 +288,7 @@ export function deriveAll(s: GameState): Derived {
       let rate = ECONOMY.revenueRates[c] * ECONOMY.spotRateFraction * cityPrice[f.cityId];
       if (boom && c === 'gpu') rate *= 1.4;
       if (cloudSurge && c !== 'gpu') rate *= 1.25;
-      rate *= (1 + capRate[c] + specOf(f.cityId).rates[c] + (net.city[f.cityId]?.spotBonus ?? 0)) * (s.dev?.sale ?? 1);
+      rate *= (1 + capRate[c] + specOf(f.cityId).rates[c] + (net.city[f.cityId]?.spotBonus ?? 0)) * (s.dev?.sale ?? 1) * revK;
       spot += st.free[c] * rate;
     });
     st.revenue = { contracts: cRev, spot };
@@ -293,7 +303,7 @@ export function deriveAll(s: GameState): Derived {
 
   // ---- company totals ----
   const t: Derived['totals'] = {
-    transitHr: net.transitHr, networkHr: net.upkeepHr, integrationHr: 0, rndHr: 0, networkValue: net.value,
+    transitHr: net.transitHr, networkHr: net.upkeepHr, garageRevenueHr: 0, garageCostHr: 0, integrationHr: 0, rndHr: 0, networkValue: net.value,
     revenueHr: 0, expenseHr: 0, profitHr: 0, salariesHr: 0, landTaxHr: 0, interestHr: 0, hqHr: 0,
     delivered: zero(), raw: zero(), landValue: 0, buildingValue: 0, equipmentValue: 0, valuation: 0,
     facilities: 0, properties: 0, cities: 0, countries: 0, cu: 0,
@@ -331,12 +341,15 @@ export function deriveAll(s: GameState): Derived {
   t.cities = cities.size;
   t.countries = countries.size;
   t.salariesHr = s.employees.reduce((a, x) => a + x.salary, 0) * (1 + eff(e, 'salaryCost'));
-  t.revenueHr += net.transitHr;
+  const garage = garageIncome(s);
+  t.garageRevenueHr = garage.revenue;
+  t.garageCostHr = garage.cost;
+  t.revenueHr += net.transitHr + garage.revenue;
   t.rndHr = Math.max(0, t.revenueHr) * eff(e, 'rndBudget');
   for (const x of s.integrations) if (x.until > s.gameHours) t.integrationHr += x.costHr;
   t.interestHr = (s.debt * ECONOMY.loanInterestPerDay * (1 - financeBonus * 0.5)) / 24;
   t.hqHr = ECONOMY.hqUpkeep[s.company.hqTier] ?? 0;
-  t.expenseHr += t.salariesHr + t.landTaxHr + t.interestHr + t.hqHr + net.upkeepHr + t.integrationHr + t.rndHr;
+  t.expenseHr += t.salariesHr + t.landTaxHr + t.interestHr + t.hqHr + net.upkeepHr + t.integrationHr + t.rndHr + garage.cost;
   t.profitHr = t.revenueHr - t.expenseHr;
   const earnings = Math.max(0, s.finance.avgHourProfit) * ECONOMY.profitMultipleHours * repValuationMult(s.company.reputation);
   t.valuation = Math.max(0, s.cash - s.debt + t.landValue + t.buildingValue + t.equipmentValue + net.value + earnings);

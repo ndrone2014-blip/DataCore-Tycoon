@@ -162,6 +162,7 @@ export const FIBER_KIND: Record<FiberKind, { label: string; perKm: number; level
 };
 const PAIRS: [string, string][] = [
   ['chicago', 'nova'], ['chicago', 'dallas'], ['dallas', 'phoenix'], ['phoenix', 'losangeles'], ['nova', 'newyork'], ['chicago', 'toronto'], ['newyork', 'toronto'], ['dallas', 'nova'], ['losangeles', 'dallas'], ['chicago', 'losangeles'],
+  ['carmi', 'chicago'], ['carmi', 'nova'],
   ['london', 'amsterdam'], ['amsterdam', 'frankfurt'], ['london', 'paris'], ['paris', 'frankfurt'],
   ['tokyo', 'seoul'], ['seoul', 'singapore'], ['tokyo', 'singapore'], ['sydney', 'melbourne'],
   ['newyork', 'london'], ['nova', 'paris'], ['newyork', 'amsterdam'], ['losangeles', 'tokyo'], ['losangeles', 'sydney'], ['singapore', 'sydney'], ['frankfurt', 'singapore'], ['tokyo', 'sydney'],

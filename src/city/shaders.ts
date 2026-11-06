@@ -11,7 +11,7 @@ const COMMON = /* glsl */ `
 precision highp float;
 precision highp sampler2DShadow;
 uniform vec3 uCam, uSunDir, uSunCol, uSkyTop, uSkyHor, uSkyGnd;
-uniform float uAmbient, uNight, uTime, uFogK;
+uniform float uAmbient, uNight, uTime, uFogK, uAutumn;
 uniform mat4 uSunVP;
 #if Q > 0
 uniform sampler2DShadow uShadow;
@@ -51,6 +51,8 @@ vec3 finish(vec3 col,vec3 p){
   col=mix(col,skyAt(vec3(v.x,max(v.y,0.)+d*.02,v.z)/d),f);
   // ACES tone map + sRGB
   col*=.86; col=clamp((col*(2.51*col+.03))/(col*(2.43*col+.59)+.14),0.,1.);
+  // a light colour grade: slightly richer colour and contrast for one line of maths
+  col=mix(vec3(dot(col,vec3(.3,.59,.11))),col,1.07); col=clamp(col,0.,1.); col=mix(col,col*col*(3.-2.*col),.12);
   return pow(col,vec3(1./2.2));
 }
 vec3 light(vec3 alb,vec3 N,vec3 V,vec3 P,float rough,float metal,float ao,out float shOut){
@@ -153,7 +155,7 @@ void main(){
     float stripe=smoothstep(.035+w,.035,abs(fract(q.x)-.5))*(step(.4,q.y)*step(q.y,5.6)+step(10.4,q.y)*step(q.y,15.6));
     alb=mix(alb,vec3(.3,.3,.28),stripe*fade*.8);
   } else if(st<10.5){ // grass
-    float n=fbm(vP.xz*.17); float g=vnoise(vP.xz*2.6); alb=mix(vec3(.105,.2,.055),vec3(.19,.29,.09),n)*(.86+.3*g); rough=1.;
+    float n=fbm(vP.xz*.17); float g=vnoise(vP.xz*2.6); alb=mix(vec3(.105,.2,.055),vec3(.19,.29,.09),n)*(.86+.3*g); rough=1.; if(uAutumn>.5) alb=mix(alb,alb*vec3(1.3,1.02,.72),.5);
   } else if(st<11.5){ // concrete paving
     alb*=.8+.3*fbm(vP.xz*.25+seed); vec2 q=vP.xz/4.; vec2 w=fwidth(q); vec2 d=abs(fract(q)-.5); float fade=1.-smoothstep(.15,.5,max(w.x,w.y));
     alb*=1.-.28*fade*(smoothstep(.49-w.x,.5,d.x)+smoothstep(.49-w.y,.5,d.y)); rough=.9;
@@ -240,13 +242,23 @@ void main(){ vP=aP; gl_Position=uVP*vec4(aP,1.); }`;
 export const GROUND_FS = /* glsl */ `#version 300 es
 ${COMMON}
 in vec3 vP; out vec4 O; uniform vec2 uGrid; uniform float uSt;
+uniform vec2 uRoad; uniform vec4 uTownB, uHwy; uniform float uTownOn;
 // distance to the nearest street centre line
 vec2 streetUV(vec2 p,float period,float off){ float q=(p.x-off)/period; float k=floor(q+.5); return vec2(p.x-off-k*period,k); }
 void main(){
   vec2 p=vP.xz; float seed=hash21(floor(p/40.));
   vec2 sx=streetUV(p,uGrid.x,uSt*.5); vec2 sz=streetUV(p.yx,uGrid.y,uSt*.5);
   float dx=abs(sx.x), dz=abs(sz.x);
-  float RH=11., WALK=17.;
+  float RH=uRoad.x, WALK=uRoad.y;
+  // small towns: the street grid stops at the edge of town; only the highways carry on through the fields
+  float inT=1., hwy=1e5;
+  if(uTownOn>.5){
+    inT=step(uTownB.x,p.x)*step(p.x,uTownB.z)*step(uTownB.y,p.y)*step(p.y,uTownB.w);
+    if(inT<.5){ dx=1e5; dz=1e5; }
+    float hwX=abs(p.x-uHwy.x), hwZ=abs(p.y-uHwy.y);
+    if(p.x<uTownB.x) hwZ=min(hwZ,abs(p.y-uHwy.z));
+    dx=min(dx,hwX); dz=min(dz,hwZ); hwy=min(hwX,hwZ);
+  }
   float wx=fwidth(p.x)+fwidth(p.y);
   float onX=step(dx,RH), onZ=step(dz,RH); float road=max(onX,onZ);
   float n=fbm(p*.11), n2=vnoise(p*1.6), n3=vnoise(p*9.);
@@ -259,11 +271,39 @@ void main(){
   float joint=smoothstep(.96,1.,max(tile.x,tile.y))*tfade;
   vec3 walk=walkC*(.8+.3*n+.08*n3)*(1.-.28*joint);
   vec3 lotC=vec3(.15,.145,.135)*(.8+.3*n);
+  float water=0.;
+  if(uTownOn>.5){
+    if(inT>.5){
+      // lawns and yards
+      lotC=mix(vec3(.13,.2,.075),vec3(.17,.22,.09),n)*(.8+.3*n2);
+    } else {
+      // farmland: fields of different crops with darker hedgerows between them
+      vec2 fc=p/vec2(250.,190.); vec2 id=floor(fc+vec2(.13,.41)); float h=hash21(id);
+      vec2 e=abs(fract(fc+vec2(.13,.41))-.5);
+      vec3 stubble=vec3(.33,.28,.15), soil=vec3(.17,.125,.08), wheat=vec3(.14,.23,.075), pasture=vec3(.19,.25,.1);
+      vec3 crop=h<.35?stubble:h<.58?soil:h<.8?wheat:pasture;
+      float rows=h<.8?.5+.5*sin((h<.5?p.x:p.y)*1.15):.5;
+      crop*=(.86+.28*n)*(1.-.16*rows*(1.-smoothstep(.2,.8,wx)));
+      lotC=mix(crop,vec3(.08,.11,.05),smoothstep(.485,.497,max(e.x,e.y))*(.6+.4*n2));
+    }
+    if(uAutumn>.5) lotC=mix(lotC,lotC*vec3(1.3,1.02,.72),.5);
+  }
   vec3 alb=lotC; float rough=.95;
-  float walkMask=max(step(dx,WALK),step(dz,WALK));
+  float walkMask=max(step(dx,WALK),step(dz,WALK))*inT;
   alb=mix(alb,walk,walkMask);
+  if(uTownOn>.5){
+    alb=mix(alb,vec3(.2,.18,.15)*(.8+.4*n),step(hwy,RH+2.2)*(1.-inT));
+    float rd=abs(p.x-(uHwy.w+70.*sin(p.y*.0032)+35.*sin(p.y*.0091+1.7)));
+    alb=mix(alb,vec3(.15,.13,.08)*(.8+.4*n),smoothstep(36.,27.,rd));
+    if(rd<27.){ water=1.; rough=.1; alb=vec3(.022,.05,.052)*(.75+.5*vnoise(p*vec2(.09,.022)+vec2(0.,uTime*.12))); }
+  }
   float curb=max(smoothstep(RH+.45+wx,RH+.42,dx)*step(RH,dx),smoothstep(RH+.45+wx,RH+.42,dz)*step(RH,dz));
-  alb=mix(alb,vec3(.3,.295,.28),curb);
+  alb=mix(alb,vec3(.3,.295,.28),curb*inT);
+  if(uAutumn>.5&&road<.5&&water<.5){
+    // drifts of fallen leaves, using noise already computed above so this costs next to nothing
+    float lf=smoothstep(.6,.7,n3)*smoothstep(.42,.6,n)*(1.-smoothstep(.1,.5,wx));
+    alb=mix(alb,mix(vec3(.5,.17,.04),vec3(.6,.4,.06),n2),lf*.85);
+  }
   if(road>.5){
     alb=asphalt; rough=.86;
     float inter=onX*onZ;
@@ -273,12 +313,12 @@ void main(){
     float mk=0.; vec3 mkC=white;
     if(inter<.5){
       float d=onX>.5?dx:dz; float along=onX>.5?p.y:p.x; float sd=onX>.5?sx.x:sz.x;
-      float cl=smoothstep(.34+wx,.34,abs(d-.3)); if(cl>0.){ mk=cl; mkC=yellow; }
+      float cl=smoothstep(.34+wx,.34,abs(d-.3))*(uTownOn>.5?step(hwy,RH):1.); if(cl>0.){ mk=cl; mkC=yellow; }
       float dash=smoothstep(.12+wx,.12,abs(d-5.5))*step(.55,fract(along/9.)); mk=max(mk,dash);
       float edge=smoothstep(.1+wx,.1,abs(d-10.3))*(1.-.0); mk=max(mk,edge*.8);
       // stop bars and zebra crossings just before each junction
       float toJ=onX>.5?dz:dx;
-      if(toJ>RH&&toJ<RH+7.5){
+      if(uTownOn<.5&&toJ>RH&&toJ<RH+7.5){
         float k=toJ-RH;
         float zebra=step(1.2,k)*step(k,5.6)*step(.5,fract(sd/1.8));
         float bar=step(6.1,k)*step(k,6.8)*step(0.,sd*(onX>.5?sign(sz.x):sign(sx.x)));
@@ -290,8 +330,9 @@ void main(){
   }
   vec3 N=vec3(0,1,0),V=normalize(uCam-vP); float sh;
   vec3 c=light(alb,N,V,vP,rough,0.,1.,sh);
+  if(water>.5) c=mix(c,skyAt(reflect(-V,N)),.42);
   // pools of street light after dark
-  if(uNight>.05){
+  if(uNight>.05&&inT>.5){
     float lx=mod(p.y,28.)-14., lz=mod(p.x,28.)-14.;
     float g=exp(-((dx-WALK+3.)*(dx-WALK+3.)+lx*lx)/42.)+exp(-((dz-WALK+3.)*(dz-WALK+3.)+lz*lz)/42.);
     c+=vec3(1.,.76,.46)*g*uNight*alb*3.;

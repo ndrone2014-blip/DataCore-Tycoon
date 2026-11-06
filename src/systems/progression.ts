@@ -8,6 +8,7 @@ import { RESEARCH } from '../config/research';
 import { getZone } from '../world/parcels';
 import { money } from '../core/format';
 import { randInt, pick } from '../core/rng';
+import { hookupsDone, isCareer, rewardCash } from './careerCore';
 
 type Metric = (s: GameState, d: Derived) => number;
 
@@ -59,6 +60,13 @@ export const METRICS: Record<string, Metric> = {
   allResearch: (s) => (s.research.done.length >= RESEARCH.length ? 1 : 0),
   green: (s) => (s.research.done.includes('green_ppa') ? 1 : 0),
   upgrades: (s) => s.stats.upgrades ?? 0,
+  // company progression
+  gigs: (s) => s.career?.gigsDone ?? 0,
+  garage: (s) => s.career?.garage ?? 0,
+  // sites from older saves were connected from day one
+  hookups: (s) => (s.stats.hookups ?? 0) + Object.values(s.facilities).filter((f) => !f.isHQ && !f.hookups).length,
+  onlineDCs: (s, d) => Object.values(s.facilities).filter((f) => !f.isHQ && hookupsDone(f) && (d.fac[f.id]?.servers ?? 0) > 0).length,
+  profitHours: (s) => (isCareer(s) ? s.career.profitHours : s.finance.totalRevenue > 0 ? 9999 : 0),
 };
 
 function zoneOfParcel(pid: string): string | undefined {
@@ -145,6 +153,20 @@ export const STORY: Omit<Mission, 'base'>[] = [
   { id: 's18', title: 'Global AI Empire', desc: 'Reach company level 50.', metric: 'level', target: 50, reward: { cash: 500_000_000, xp: 0 } },
 ];
 
+/** A new company's opening chapter, then the classic missions with payouts to match the slower economy. */
+export const CAREER_STORY: Omit<Mission, 'base'>[] = [
+  { id: 'c0', title: 'Hang out your shingle', desc: 'Take a freelance job from your board on the Company Progress page or the Dashboard.', metric: 'gigs', target: 1, reward: { cash: 300, xp: 30 } },
+  { id: 'c1', title: 'Buy the first property', desc: 'Save up and buy the one property on the market. Keep working, and consider a used server for the garage.', metric: 'properties', target: 1, reward: { cash: 1_500, xp: 80 } },
+  { id: 'c2', title: 'Clear the site', desc: 'Open your property on the World Map and demolish the old building.', metric: 'demolitions', target: 1, reward: { cash: 1_000, xp: 60 } },
+  { id: 'c3', title: 'Break ground', desc: 'Take the construction loan if you need it, then build a Modular Data Center.', metric: 'builds', target: 1, reward: { cash: 4_000, xp: 150 } },
+  { id: 'c4', title: 'Get connected', desc: 'On the Data Centers page, order electric service and a fiber connection.', metric: 'hookups', target: 1, reward: { cash: 1_500, xp: 80 } },
+  { id: 'c5', title: 'Rack it up', desc: 'Install 4 servers. Six or more usually covers the cost of running the site.', metric: 'servers', target: 4, reward: { cash: 2_500, xp: 100 } },
+  { id: 'c6', title: 'First customer', desc: 'Sign a customer contract. It pays far better than selling idle capacity on the spot market.', metric: 'contractsSigned', target: 1, reward: { cash: 2_000, xp: 120 } },
+  { id: 'c7', title: 'In the black', desc: 'Stay profitable for four game days, with loan interest included.', metric: 'profitHours', target: 96, reward: { cash: 5_000, xp: 300 } },
+  ...STORY.slice(5).map((m) => ({ ...m, reward: { ...m.reward, cash: m.reward.cash ? Math.round((m.reward.cash * 0.2) / 100) * 100 : undefined } })),
+];
+export const storyOf = (s: GameState) => (isCareer(s) ? CAREER_STORY : STORY);
+
 const DAILY_POOL = [
   { id: 'd_rev', title: 'Revenue push', metric: 'totalRevenue', mult: 'revenue' },
   { id: 'd_srv', title: 'Capacity expansion', metric: 'servers', mult: 'servers' },
@@ -164,6 +186,8 @@ export function todayKey(): string {
 export function rollDailies(s: GameState, d: Derived) {
   const key = todayKey();
   if (s.missions.daily.date === key && s.missions.daily.items.length) return;
+  // no daily targets until there is a business to run
+  if (isCareer(s) && s.career.done.g_operational === undefined) { s.missions.daily = { date: '', items: [] }; return; }
   const pool = [...DAILY_POOL];
   const items: Mission[] = [];
   const profit = Math.max(500, d.totals.profitHr);
@@ -187,7 +211,9 @@ export function rollDailies(s: GameState, d: Derived) {
       target = 1;
       desc = { d_prop: 'Buy a property.', d_build: 'Complete a construction project.', d_demo: 'Demolish a building.', d_done: 'Complete a customer contract.' }[t.id as string] ?? '';
     }
-    items.push({ id: `${key}-${t.id}`, title: t.title, desc, metric: t.metric, target, base: METRICS[t.metric](s, d), reward: { cash: Math.round((profit * randInt(250, 450)) / 1000) * 1000, xp: 150 + s.level * 25 } });
+    if (isCareer(s) && t.mult === 'revenue') { target = Math.round(Math.max(1_000, d.totals.revenueHr * 200) / 100) * 100; desc = `Earn ${money(target)} in revenue.`; }
+    const cash = isCareer(s) ? Math.round((Math.max(120, d.totals.profitHr) * randInt(20, 35)) / 100) * 100 : Math.round((profit * randInt(250, 450)) / 1000) * 1000;
+    items.push({ id: `${key}-${t.id}`, title: t.title, desc, metric: t.metric, target, base: METRICS[t.metric](s, d), reward: { cash, xp: isCareer(s) ? 40 + s.level * 15 : 150 + s.level * 25 } });
   }
   s.missions.daily = { date: key, items };
 }
@@ -198,7 +224,7 @@ export function missionProgress(s: GameState, d: Derived, m: Mission): number {
 }
 
 export function currentStory(s: GameState): Omit<Mission, 'base'> | undefined {
-  return STORY[s.missions.tutorial];
+  return storyOf(s)[s.missions.tutorial];
 }
 
 export function claimMission(s: GameState, d: Derived, kind: 'story' | 'daily', id: string): { ok: boolean; reason?: string } {
@@ -228,11 +254,12 @@ export function checkAchievements(s: GameState, d: Derived) {
     if (s.achievements[a.id] !== undefined) continue;
     if (METRICS[a.metric](s, d) >= a.target) {
       s.achievements[a.id] = s.gameHours;
-      if (a.reward.cash) receive(s, a.reward.cash, 'Rewards', `Achievement: ${a.title}`);
+      const achCash = a.reward.cash ? rewardCash(s, a.reward.cash) : 0;
+      if (achCash) receive(s, achCash, 'Rewards', `Achievement: ${a.title}`);
       if (a.reward.xp) addXp(s, a.reward.xp, 'Achievement');
       if (a.reward.perm) for (const [k, v] of Object.entries(a.reward.perm)) s.permanent[k] = (s.permanent[k] ?? 0) + v;
       log(s, `Achievement unlocked: ${a.title}`, 'good');
-      toast({ title: `Achievement: ${a.title}`, body: `${a.desc}${a.reward.cash ? ' +' + money(a.reward.cash) : ''}${a.reward.permLabel ? ' · ' + a.reward.permLabel : ''}`, kind: 'achievement', icon: a.icon });
+      toast({ title: `Achievement: ${a.title}`, body: `${a.desc}${achCash ? ' +' + money(achCash) : ''}${a.reward.permLabel ? ' · ' + a.reward.permLabel : ''}`, kind: 'achievement', icon: a.icon });
       sfx('achievement');
       emit('achievement', a.id);
     }

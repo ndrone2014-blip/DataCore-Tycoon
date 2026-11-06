@@ -1,6 +1,6 @@
 {
   "name": "ai-datacenter-empire",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "AI Data Center Empire — a browser-based 3D business & city-building simulator.",
   "scripts": {
@@ -8,7 +8,7 @@
     "dev": "node build.mjs --watch & node serve.mjs",
     "start": "node serve.mjs",
     "typecheck": "tsc -p . --noEmit",
-    "test": "tsx tests/sim.test.ts && tsx tests/expansion.test.ts && tsx tests/devtools.test.ts"
+    "test": "tsx tests/sim.test.ts && tsx tests/expansion.test.ts && tsx tests/devtools.test.ts && tsx tests/career.test.ts"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

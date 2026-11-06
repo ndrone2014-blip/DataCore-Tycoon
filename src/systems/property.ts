@@ -10,6 +10,8 @@ import { spend, receive, log, addXp, stat, canAfford } from './ledger';
 import { toast, sfx, emit } from '../core/bus';
 import { constructionMult, getEffects, deptBonus, eff } from './modifiers';
 import { money } from '../core/format';
+import { ECONOMY as E } from '../config/economy';
+import { hasFeature, isCareer } from './careerCore';
 
 export function parcelState(s: GameState, id: string): ParcelState {
   const st = s.parcels[id];
@@ -43,6 +45,7 @@ export function canBuy(s: GameState, id: string): Check {
   const st = parcelState(s, id);
   if (st.owner === 'player') return { ok: false, reason: 'You already own this property' };
   if (st.owner) return { ok: false, reason: 'Owned by a competitor' };
+  if (isCareer(s) && !hasFeature(s, 'g_profit') && id !== s.company.startParcel) return { ok: false, reason: 'Not on the market yet: get your first data center profitable first' };
   const price = landValue(s, id);
   if (!canAfford(s, price)) return { ok: false, reason: `Need ${money(price)}` };
   return { ok: true };
@@ -88,6 +91,7 @@ export function zoneQuote(s: GameState, zoneId: string): { ok: boolean; reason?:
   const z = getZone(zoneId);
   if (!z) return { ok: false, reason: 'Unknown zone', price: 0, lots: [], full: 0 };
   if (!isCityUnlocked(s, z.cityId)) return { ok: false, reason: `Unlock ${cityById(z.cityId).name} first`, price: 0, lots: [], full: 0 };
+  if (!hasFeature(s, 'g_zones')) return { ok: false, reason: 'Unlocks with Large Development Projects', price: 0, lots: [], full: 0 };
   const lots: string[] = [];
   let full = 0;
   for (const pid of z.parcelIds) {
@@ -203,6 +207,7 @@ export function consolidateQuote(s: GameState, zoneId: string): { ok: boolean; r
   if (!z) return { ok: false, reason: 'Unknown zone', cost: 0 };
   const site = parcelState(s, z.siteId);
   if (site.owner === 'player') return { ok: false, reason: 'Already consolidated', cost: 0 };
+  if (!hasFeature(s, 'g_campus')) return { ok: false, reason: 'Unlocks with Large-Scale Campuses', cost: 0 };
   for (const pid of z.parcelIds) {
     const st = parcelState(s, pid);
     if (st.owner !== 'player') return { ok: false, reason: 'You must own every lot in the zone', cost: 0 };
@@ -232,7 +237,9 @@ export function consolidateZone(s: GameState, zoneId: string): Check {
 
 /** Market license price after company strategy. */
 export function licenseFee(s: GameState, cityId: string): number {
-  const base = cityById(cityId).license;
+  const city = cityById(cityId);
+  // older versions gave the big starter metros away; a career company pays to enter them
+  const base = city.license || (isCareer(s) && !city.town ? city.demand * E.career.licensePerDemand : isCareer(s) ? 50_000 : 0);
   return base ? Math.round((base * (1 + eff(getEffects(s), 'licenseCost'))) / 1000) * 1000 : 0;
 }
 
@@ -240,6 +247,7 @@ export function unlockCity(s: GameState, cityId: string): Check {
   const c = cityById(cityId);
   const fee = licenseFee(s, cityId);
   if (isCityUnlocked(s, cityId)) return { ok: false, reason: 'Already unlocked' };
+  if (!hasFeature(s, 'g_stage2')) return { ok: false, reason: 'New markets open when you become an Established Company' };
   if (s.level < c.unlockLevel) return { ok: false, reason: `Requires company level ${c.unlockLevel}` };
   if (!canAfford(s, fee)) return { ok: false, reason: `Need ${money(fee)}` };
   if (fee > 0) spend(s, fee, 'Licenses', `Market entry license: ${c.name}`);

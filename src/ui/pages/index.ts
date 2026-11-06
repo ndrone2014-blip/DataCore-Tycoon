@@ -9,6 +9,7 @@ import { mapActions, mapChanges } from './mapPanel';
 import { devActions, devChanges } from './devPanel';
 import { renderStrategy, renderNetwork, renderMarkets, renderSuppliers, renderIndustry, corporateActions, corporateChanges } from './corporate';
 import { money } from '../../core/format';
+import { renderProgress, progressActions, progressChanges } from './progress';
 
 type Handler = (el: HTMLElement, ev: Event) => void;
 
@@ -24,6 +25,7 @@ export interface PageDef {
 
 export const PAGES: PageDef[] = [
   { id: 'dashboard', title: 'Dashboard', icon: 'dashboard', subtitle: (a) => `Welcome back, CEO of ${a.s.company.name}.`, render: renderDashboard },
+  { id: 'progress', title: 'Company Progress', icon: 'progress', subtitle: () => 'Where your company stands, and what it takes to get bigger.', render: renderProgress, actions: progressActions, changes: progressChanges },
   { id: 'map', title: 'World Map', icon: 'map', render: () => '', actions: mapActions, changes: mapChanges },
   { id: 'realestate', title: 'Real Estate', icon: 'realestate', subtitle: () => 'Your portfolio and land available in unlocked markets.', render: renderRealEstate, changes: realEstateChanges },
   { id: 'construction', title: 'Construction', icon: 'construction', subtitle: () => 'Active projects, stages and speed-ups.', render: renderConstruction },

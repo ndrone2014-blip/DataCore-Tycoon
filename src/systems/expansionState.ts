@@ -26,5 +26,15 @@ export function ensureExpansion(s: GameState): GameState {
   if (!Array.isArray(x.integrations)) x.integrations = [];
   if (!isObj(x.dealCooldown)) x.dealCooldown = {};
   if (x.dev !== undefined && !isObj(x.dev)) delete x.dev;
+  // Companies founded before v2.3 keep playing exactly as they did: nothing is locked for them.
+  if (!isObj(x.career)) x.career = { mode: 'legacy', stage: 0, done: {} };
+  const c = x.career;
+  if (c.mode !== 'career' && c.mode !== 'legacy') c.mode = 'legacy';
+  if (!isObj(c.done)) c.done = {};
+  if (!isObj(c.loans)) c.loans = {};
+  if (!Array.isArray(c.board)) c.board = [];
+  for (const k of ['stage', 'profitHours', 'boardAt', 'gigsDone', 'garage', 'endless']) if (typeof c[k] !== 'number' || !isFinite(c[k])) c[k] = 0;
+  c.stage = Math.max(0, Math.min(4, Math.floor(c.stage)));
+  c.autoGigs = !!c.autoGigs;
   return s;
 }

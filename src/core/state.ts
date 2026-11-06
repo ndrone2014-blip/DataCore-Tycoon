@@ -3,7 +3,7 @@
 import type { CapType, CustomOptions } from '../config/buildings';
 import type { CustomerType, Department } from '../config/content';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export type ParcelStatus = 'existing' | 'cleared' | 'demolishing' | 'construction' | 'facility' | 'hq';
 
@@ -48,6 +48,12 @@ export interface Facility {
   vendor?: Record<string, { n: number; perf: number; rel: number }>;
   /** Acquired sites run below par until they are integrated. */
   integrateUntil?: number;
+  /**
+   * Utility connections for sites built in a career company. Absent means fully connected
+   * (every facility from an older save, and every site bought from a rival).
+   * -1 = not ordered yet, above 0 = seconds of work left, 0 = connected.
+   */
+  hookups?: { power: number; net: number };
 }
 
 export interface Project {
@@ -207,6 +213,8 @@ export interface Settings {
   celebrations: boolean;
   contractAlerts: 'all' | 'problems' | 'off';
   autoAssignStaff: boolean;
+  /** Seasonal decorations: 'auto' follows the calendar. */
+  seasonal: 'auto' | 'on' | 'off';
 }
 
 export interface LogEntry {
@@ -289,8 +297,35 @@ export interface GameState {
   rep: { history: number[]; parts: Record<string, number> };
   integrations: Integration[];
   dealCooldown: Record<string, number>;
+  /** Company progression. Saves from before v2.3 load as 'legacy': everything stays unlocked. */
+  career: CareerState;
   /** Developer testing overrides. Absent in normal play. */
   dev?: DevOverrides;
+}
+
+export interface Gig { id: string; title: string; client: string; icon: string; seconds: number; pay: number; tier: number }
+export interface CareerState {
+  mode: 'career' | 'legacy';
+  /** 0 Garage Startup .. 4 Global Empire. */
+  stage: number;
+  /** Goal id -> game hour it was reached. */
+  done: Record<string, number>;
+  /** Legacy saves: goals already reached were recorded without a celebration. */
+  seeded?: boolean;
+  /** Consecutive game hours in the black while running a data center. */
+  profitHours: number;
+  gig?: { def: Gig; done: number };
+  board: Gig[];
+  boardAt: number;
+  gigsDone: number;
+  autoGigs: boolean;
+  /** Used servers humming in the founder's garage. */
+  garage: number;
+  loans: { construction?: number; equipment?: number };
+  /** Highest endless valuation goal reached (power of ten). */
+  endless: number;
+  /** Season already greeted, so the notification appears once a year. */
+  greeted?: string;
 }
 
 export interface DevOverrides { land?: number; construction?: number; equipment?: number; electricity?: number; sale?: number; unlockAll?: boolean }
@@ -335,6 +370,7 @@ export function defaultSettings(): Settings {
     celebrations: true,
     contractAlerts: 'all',
     autoAssignStaff: false,
+    seasonal: 'auto',
   };
 }
 

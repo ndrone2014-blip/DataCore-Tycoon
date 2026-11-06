@@ -14,6 +14,9 @@ import { CAP_LABEL } from '../../config/buildings';
 import { eventText } from '../../systems/events';
 import { currentStory, missionProgress } from '../../systems/progression';
 import { statusLabel } from './mapPanel';
+import { founderDesk, loanCards, progressStrip } from './progress';
+import { canBuy } from '../../systems/property';
+import { isCareer, hasFeature } from '../../systems/career';
 
 const sumRec = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a + b, 0);
 
@@ -25,6 +28,9 @@ export function renderDashboard(app: App): string {
   const sp = story ? missionProgress(s, d, { ...story, base: 0 }) : 0;
   const warnings = Object.values(s.facilities).filter((f) => d.fac[f.id]?.warnings.length);
   return `
+  ${progressStrip(app)}
+  ${founderDesk(app)}
+  ${loanCards(app)}
   ${s.cash < 0 ? `<div class="callout bad">⚠️ <b>Your cash is negative.</b> Expenses keep running — take a bank loan on the Finances page, sell idle property, or cut staff before things get worse.</div>` : ''}
   ${story ? `<div class="card mission-banner ${sp >= 1 ? 'ready' : ''}">
     <div><small>Current mission</small><h3>${esc(story.title)}</h3><p>${esc(story.desc)}</p></div>
@@ -96,6 +102,8 @@ export function renderRealEstate(app: App): string {
   if (oppCache?.key !== oppKey) {
     const list = allParcels()
       .filter((p) => s.unlockedCities.includes(p.cityId) && !parcelState(s, p.id).owner)
+      // a new company has exactly one property it can buy
+      .filter((p) => hasFeature(s, 'g_profit') || !isCareer(s) || p.id === s.company.startParcel)
       .filter((p) => (city === 'all' || p.cityId === city) && (type === 'all' || p.type === type))
       .map((p) => ({ p, price: landValue(s, p.id) }))
       .filter((x) => !maxPrice || x.price <= maxPrice);
@@ -122,7 +130,7 @@ export function renderRealEstate(app: App): string {
     }).join('')}</tbody></table>` : empty('🏷️', 'No properties', 'Find land on the World Map or in the opportunities list below.')}
   </div>
   <div class="card mt">
-    <div class="row between wrap gap"><h3>Development opportunities <small class="muted">(${total} available)</small></h3>
+    <div class="row between wrap gap"><h3>Development opportunities <small class="muted">(${total} available${!hasFeature(s, 'g_profit') ? ': the rest of the market opens once your first data center is profitable' : ''})</small></h3>
       <div class="row gap wrap">
         <select data-change="reCity"><option value="all">All unlocked cities</option>${s.unlockedCities.map((c) => `<option value="${c}" ${city === c ? 'selected' : ''}>${cityById(c).name}</option>`).join('')}</select>
         <select data-change="reType"><option value="all">All types</option>${Object.entries(PROPERTY_TYPE_INFO).filter(([k]) => k !== 'commercial_zone').map(([k, v]) => `<option value="${k}" ${type === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
@@ -130,7 +138,7 @@ export function renderRealEstate(app: App): string {
         <select data-change="reSort"><option value="price" ${sort === 'price' ? 'selected' : ''}>Cheapest</option><option value="area" ${sort === 'area' ? 'selected' : ''}>Largest</option><option value="ppm" ${sort === 'ppm' ? 'selected' : ''}>Best $/m²</option></select>
       </div></div>
     <table class="tbl"><thead><tr><th>Property</th><th>City</th><th>Type</th><th>Size</th><th>Zoning</th><th>Price</th><th></th></tr></thead><tbody>
-    ${opps.map(({ p, price }) => `<tr><td>${PROPERTY_TYPE_INFO[p.type].icon} <b>${esc(p.name)}</b>${p.zoneId ? ' <span class="tag sm">zone</span>' : ''}</td><td>${cityById(p.cityId).name}</td><td>${PROPERTY_TYPE_INFO[p.type].label}</td><td>${area(p.area)}</td><td>${p.zoning.code}</td><td><b>${money(price)}</b></td><td class="row gap"><button class="btn ghost sm" data-act="openParcel" data-id="${p.id}">View</button>${btn('Buy', 'buyParcel', { id: p.id }, 'primary sm', s.cash < price ? `Need ${money(price)}` : undefined)}</td></tr>`).join('')}
+    ${opps.map(({ p, price }) => `<tr><td>${PROPERTY_TYPE_INFO[p.type].icon} <b>${esc(p.name)}</b>${p.zoneId ? ' <span class="tag sm">zone</span>' : ''}</td><td>${cityById(p.cityId).name}</td><td>${PROPERTY_TYPE_INFO[p.type].label}</td><td>${area(p.area)}</td><td>${p.zoning.code}</td><td><b>${money(price)}</b></td><td class="row gap"><button class="btn ghost sm" data-act="openParcel" data-id="${p.id}">View</button>${(() => { const c = canBuy(s, p.id); return btn('Buy', 'buyParcel', { id: p.id }, 'primary sm', c.ok ? undefined : c.reason); })()}</td></tr>`).join('')}
     </tbody></table>
   </div>`;
 }

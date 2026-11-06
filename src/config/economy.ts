@@ -16,10 +16,10 @@ export const ECONOMY = {
 
   // ---- Start ----
   difficulties: {
-    relaxed: { label: 'Relaxed', cash: 1_800_000, competitorCash: 0.5, priceMult: 0.85 },
-    standard: { label: 'Standard', cash: 1_000_000, competitorCash: 1, priceMult: 1 },
-    hardcore: { label: 'Hardcore', cash: 650_000, competitorCash: 1.4, priceMult: 1.1 },
-  } as Record<string, { label: string; cash: number; competitorCash: number; priceMult: number }>,
+    relaxed: { label: 'Relaxed', cash: 1_800_000, careerCash: 12_000, competitorCash: 0.5, priceMult: 0.85 },
+    standard: { label: 'Standard', cash: 1_000_000, careerCash: 6_000, competitorCash: 1, priceMult: 1 },
+    hardcore: { label: 'Hardcore', cash: 650_000, careerCash: 2_500, competitorCash: 1.4, priceMult: 1.1 },
+  } as Record<string, { label: string; cash: number; careerCash: number; competitorCash: number; priceMult: number }>,
 
   // ---- Land ----
   /** Price per m^2 by property type (before city multipliers). */
@@ -159,6 +159,36 @@ export const ECONOMY = {
 
   // ---- Competitors ----
   competitorThinkHours: 6,
+
+  // ---- Career companies (every new game since v2.3; older saves keep the numbers above) ----
+  career: {
+    /** What each company stage earns and pays. Better customers and leaner sites, not cheaper hardware. */
+    stages: [
+      { name: 'Garage Startup', icon: '🏚️', revenue: 0.25, overhead: 85, credit: 0.35, blurb: 'One founder, one rented garage and a plan.' },
+      { name: 'Growing Business', icon: '🌱', revenue: 0.3, overhead: 70, credit: 0.35, blurb: 'A profitable site, a payroll and a local reputation.' },
+      { name: 'Established Company', icon: '🏢', revenue: 0.38, overhead: 60, credit: 0.45, blurb: 'Several sites, real research and customers who call you first.' },
+      { name: 'Major Corporation', icon: '🏙️', revenue: 0.48, overhead: 55, credit: 0.55, blurb: 'Multi-city infrastructure with serious engineering behind it.' },
+      { name: 'Global Empire', icon: '🌍', revenue: 0.6, overhead: 45, credit: 0.6, blurb: 'You set the pace for the whole industry.' },
+    ],
+    /** Rivals earn on the same slower curve, so the race stays close. */
+    rivalRevenue: 0.25,
+    salaryMult: 0.45,
+    /** Achievement and opportunity payouts, scaled to the slower economy. */
+    rewardMult: 0.04,
+    offlineCapHours: 2,
+    /** Each finished data center teaches your crews something: labor, permits and site prep. */
+    learningPerBuild: 0.04,
+    learningMax: 0.3,
+    /** Share of the starter build that the local bank will finance once you own the land. */
+    constructionLoanShare: 0.8,
+    equipmentLoan: 60_000,
+    garage: { price: 2_400, growth: 1.35, max: 4, incomeHr: 4.4, powerHr: 0.4 },
+    hookup: { powerBase: 6_000, powerPerKw: 60, netBase: 3_500, netPerSlot: 150, seconds: 45, sameCityCut: 0.5 },
+    /** Hours in the black before the first site counts as truly profitable. */
+    profitHoursGoal: 96,
+    /** Market licence for cities that were free in older versions, per unit of demand. */
+    licensePerDemand: 40,
+  },
 };
 
 export function xpForLevel(level: number): number {

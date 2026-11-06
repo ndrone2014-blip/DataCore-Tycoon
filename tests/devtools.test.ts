@@ -21,7 +21,7 @@ import { xpForLevel } from '../src/config/economy';
 
 let fails = 0;
 const ok = (c: unknown, m: string) => { if (c) console.log('ok  ', m); else { console.error('FAIL', m); fails++; } };
-const game = () => newGame({ name: 'D', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+const game = () => newGame({ name: 'D', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
 
 // ---- password ----
 {

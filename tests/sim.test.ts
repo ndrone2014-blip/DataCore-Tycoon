@@ -16,7 +16,7 @@ import { serialize, parse } from '../src/save/save';
 import { money } from '../src/core/format';
 
 const assert = (c: any, m: string) => { if (!c) { console.error('FAIL', m); (globalThis as any).process.exitCode = 1; } else console.log('ok  ', m); };
-const s = newGame({ name: 'TestCo', logo: '⬡', color: '#3b82f6', startCity: 'chicago', difficulty: 'standard' });
+const s = newGame({ name: 'TestCo', logo: '⬡', color: '#3b82f6', startCity: 'chicago', difficulty: 'standard', mode: 'legacy' });
 const start = s.company.startParcel!;
 assert(s.parcels[start].owner === 'player', 'start parcel owned');
 for (const c of ['chicago','nova','tokyo','sydney']) { const l = getCityLayout(c); console.log(c, 'parcels', l.parcels.length, 'zones', l.zones.length); }
@@ -81,7 +81,7 @@ import { advanceFrozen } from '../src/systems/sim';
 import { autoEquip } from '../src/systems/equipment';
 import { DECISIONS, resolveDecision } from '../src/systems/decisions';
 {
-  const g = newGame({ name: 'Calm', logo: '⬡', color: '#22c55e', startCity: 'dallas', difficulty: 'relaxed' });
+  const g = newGame({ name: 'Calm', logo: '⬡', color: '#22c55e', startCity: 'dallas', difficulty: 'relaxed', mode: 'legacy' });
   const sp = g.company.startParcel!;
   startDemolition(g, sp);
   const cash0 = g.cash, gh0 = g.gameHours;
@@ -126,7 +126,7 @@ import { DECISIONS, resolveDecision } from '../src/systems/decisions';
 
 // ---- v2 feedback fixes ----
 {
-  const g = newGameV2({ name: 'T', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const g = newGameV2({ name: 'T', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
   advanceV2(g, 3);
   const rival = g.competitors[0];
   const ownedLots = Object.values(g.parcels).filter((p) => p.owner === rival.id).length;
@@ -153,7 +153,7 @@ import { DECISIONS, resolveDecision } from '../src/systems/decisions';
   console.log('ok   game keeps running with no rivals left');
 
   // auto-equip must spend small budgets usefully, explain failures and never overload
-  const h = newGameV2({ name: 'U', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard' });
+  const h = newGameV2({ name: 'U', logo: 'A', color: '#3b82f6', startCity: 'nova', difficulty: 'standard', mode: 'legacy' });
   const fid = 'dcZ';
   const pid = h.company.startParcel!;
   h.parcels[pid] = { owner: 'player', status: 'facility', facilityId: fid };

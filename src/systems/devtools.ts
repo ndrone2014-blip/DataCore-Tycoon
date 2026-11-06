@@ -13,7 +13,7 @@ import { parcelState, finishDemolition } from './property';
 import { finishBuild } from './construction';
 import { autoEquip } from './equipment';
 import { advance } from './sim';
-import { ACHIEVEMENTS, STORY } from './progression';
+import { ACHIEVEMENTS, storyOf } from './progression';
 import { addCompetitorSite } from './competitors';
 import { startEvent } from './events';
 import { DECISIONS } from './decisions';
@@ -199,7 +199,7 @@ export function resetAchievements(s: GameState): R {
   return OK;
 }
 export function completeStory(s: GameState): R {
-  s.missions.tutorial = STORY.length;
+  s.missions.tutorial = storyOf(s).length;
   return OK;
 }
 

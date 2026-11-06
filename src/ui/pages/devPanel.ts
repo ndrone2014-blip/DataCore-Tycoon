@@ -11,7 +11,7 @@ import { BLUEPRINTS } from '../../config/buildings';
 import { EVENT_DEFS } from '../../config/content';
 import { RESEARCH } from '../../config/research';
 import { SUPPLIERS } from '../../config/expansion';
-import { ACHIEVEMENTS, STORY } from '../../systems/progression';
+import { ACHIEVEMENTS, storyOf } from '../../systems/progression';
 import { DECISIONS } from '../../systems/decisions';
 import * as dev from '../../systems/devtools';
 import { deleteBackup, deleteSaves, exportSave, importSaveFile, listBackups, readBackup, saveGame, serialize, writeBackup } from '../../save/save';
@@ -130,7 +130,7 @@ function progressView(app: App): string {
       <div class="dev-fields">${input('dev-level', 'Level (1 to 100)', String(s.level))}${input('dev-xp', 'XP to add', '5000')}${input('dev-rep', 'Reputation (0 to 100)', '90')}</div>
       <div class="dev-acts">${act('Set level', 'devLevel', {}, 'primary')}${act('Add XP', 'devXp')}${act('Set reputation', 'devRep')}</div>`)}
     ${box('Research', `<div class="kv small"><span>Finished</span><b>${s.research.done.length} / ${RESEARCH.length}</b></div><div class="dev-acts">${act('Unlock all research', 'devResearch', {}, 'primary')}${act('Reset research', 'devResearchReset', {}, 'danger')}</div>`)}
-    ${box('Achievements and missions', `<div class="kv small"><span>Achievements</span><b>${Object.keys(s.achievements).length} / ${ACHIEVEMENTS.length}</b><span>Story missions</span><b>${s.missions.tutorial} / ${STORY.length}</b></div>
+    ${box('Achievements and missions', `<div class="kv small"><span>Achievements</span><b>${Object.keys(s.achievements).length} / ${ACHIEVEMENTS.length}</b><span>Story missions</span><b>${s.missions.tutorial} / ${storyOf(s).length}</b></div>
       <div class="dev-acts">${act('Unlock all achievements', 'devAch', {}, 'primary')}${act('Finish story missions', 'devStory')}${act('Reset achievements', 'devAchReset', {}, 'danger')}</div>`)}
   </div>`;
 }

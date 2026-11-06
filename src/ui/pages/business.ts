@@ -5,6 +5,7 @@ import { money, num, pct, esc, duration, gameDuration } from '../../core/format'
 import { stat, empty, btn, bar, confirmDialog, openModal, closeModal , showToast } from '../components';
 import { RESEARCH, researchById } from '../../config/research';
 import { researchState, canResearch, startResearch, researchSpeed } from '../../systems/research';
+import { hasFeature } from '../../systems/career';
 import { DEPARTMENTS, CUSTOMER_TYPES, type Department } from '../../config/content';
 import { hire, fire, promote, assign, autoAssignStaff, bulkAssign, hireCost, promoteCost, staffCap, refreshCandidates } from '../../systems/employees';
 import { deptBonus } from '../../systems/modifiers';
@@ -77,8 +78,8 @@ export function renderEmployees(app: App): string {
   <div class="card mt">
     <div class="row between wrap gap"><h3>Staff (${s.employees.length})</h3>
       <div class="row gap wrap staff-tools">
-        <button class="btn primary sm" data-act="autoAssign" ${s.employees.length ? '' : 'disabled'}>⚡ Auto-assign everyone</button>
-        <label class="check"><input type="checkbox" data-change="setting" data-k="autoAssignStaff" ${s.settings.autoAssignStaff ? 'checked' : ''}> Keep staff assigned automatically</label>
+        ${hasFeature(s, 'g_stage2') ? `<button class="btn primary sm" data-act="autoAssign" ${s.employees.length ? '' : 'disabled'}>⚡ Auto-assign everyone</button>
+        <label class="check"><input type="checkbox" data-change="setting" data-k="autoAssignStaff" ${s.settings.autoAssignStaff ? 'checked' : ''}> Keep staff assigned automatically</label>` : '<small class="muted">🔒 Auto-assign unlocks with Established Company status</small>'}
       </div></div>
     <div class="row gap wrap mt small bulk-assign"><span class="muted">Move</span>
       <select data-change="bulkDept"><option value="all">everyone</option>${depts.map((x) => `<option value="${x}" ${app.ui.bulkDept === x ? 'selected' : ''}>${DEPARTMENTS[x].label}</option>`).join('')}</select>
@@ -89,7 +90,7 @@ export function renderEmployees(app: App): string {
     ${s.employees.length ? `<table class="tbl"><thead><tr><th>Name</th><th>Department</th><th>Skill</th><th>Experience</th><th>Performance</th><th>Salary</th><th>Assignment</th><th></th></tr></thead><tbody>
     ${s.employees.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${DEPARTMENTS[e.dept].icon} ${DEPARTMENTS[e.dept].label}</td><td>${'★'.repeat(e.skill)}<span class="muted">${'☆'.repeat(5 - e.skill)}</span></td><td>${Math.round(e.exp)}h</td><td>${bar(e.perf / 100, e.perf < 50 ? 'bad' : '', Math.round(e.perf) + '%')}</td><td>${money(e.salary)}/h</td>
       <td><select data-change="assign" data-id="${e.id}"><option value="hq" ${e.assigned === 'hq' ? 'selected' : ''}>Headquarters</option>${facs.map((f) => `<option value="${f.id}" ${e.assigned === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></td>
-      <td class="row gap">${btn(`Promote ${money(promoteCost(e))}`, 'promote', { id: e.id }, 'ghost sm', e.skill >= 5 ? 'Max level' : e.exp < e.skill * 120 ? `Needs ${e.skill * 120}h experience` : s.cash < promoteCost(e) ? 'Not enough cash' : undefined)}<button class="btn danger sm" data-act="fire" data-id="${e.id}">Fire</button></td></tr>`).join('')}
+      <td class="row gap">${btn(`Promote ${money(promoteCost(e))}`, 'promote', { id: e.id }, 'ghost sm', !hasFeature(s, 'g_staff') ? 'Promotions unlock with Talent Management' : e.skill >= 5 ? 'Max level' : e.exp < e.skill * 120 ? `Needs ${e.skill * 120}h experience` : s.cash < promoteCost(e) ? 'Not enough cash' : undefined)}<button class="btn danger sm" data-act="fire" data-id="${e.id}">Fire</button></td></tr>`).join('')}
     </tbody></table>` : empty('👥', 'No employees yet', 'Hire from the candidate pool below. Every department gives a real gameplay bonus.')}
   </div>
   <div class="card mt">
